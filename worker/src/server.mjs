@@ -1,31 +1,122 @@
-import http from 'node:http';
+import { createServer } from 'node:http';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import { timingSafeEqual } from 'node:crypto';
+import { extname, join, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { ReviewStore } from './review-store.mjs';
 
-const port = Number(process.env.PORT || 8080);
-const artifactDir = process.env.ARTIFACT_DIR || '/app/artifacts';
+const moduleDir = fileURLToPath(new URL('.', import.meta.url));
+const publicDir = join(moduleDir, '..', 'public');
+const maxBodyBytes = 256 * 1024;
+const mimeTypes = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 
 const sendJson = (res, status, body) => {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(body));
 };
 
-const server = http.createServer((req, res) => {
-  if (req.method === 'GET' && req.url === '/health') {
-    return sendJson(res, 200, { ok: true, service: 'career-ops-worker', artifactDir });
-  }
+const readJson = (req) => new Promise((resolve, reject) => {
+  let size = 0;
+  let raw = '';
+  req.setEncoding('utf8');
+  req.on('data', (chunk) => {
+    size += Buffer.byteLength(chunk);
+    if (size > maxBodyBytes) {
+      reject(new Error('request body is too large'));
+      req.destroy();
+      return;
+    }
+    raw += chunk;
+  });
+  req.on('end', () => {
+    try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error('request body must be valid JSON')); }
+  });
+  req.on('error', reject);
+});
 
-  if (req.method === 'POST' && ['/scan', '/verify', '/evaluate', '/generate'].includes(req.url)) {
-    return sendJson(res, 501, {
-      ok: false,
-      error: 'Not implemented',
-      route: req.url,
-      next: 'Add a provider-specific worker handler before enabling this route in n8n.'
-    });
-  }
+const isAuthorized = (req, auth) => {
+  if (!auth.user || !auth.password) return true;
+  const header = req.headers.authorization || '';
+  const expected = `Basic ${Buffer.from(`${auth.user}:${auth.password}`).toString('base64')}`;
+  const provided = Buffer.from(header);
+  const wanted = Buffer.from(expected);
+  return provided.length === wanted.length && timingSafeEqual(provided, wanted);
+};
 
-  sendJson(res, 404, { ok: false, error: 'Not found' });
+const sendUnauthorized = (res) => {
+  res.writeHead(401, { 'www-authenticate': 'Basic realm="Career-Ops review"', 'cache-control': 'no-store' });
+  res.end('Authentication required');
+};
+
+const serveStatic = async (res, pathname) => {
+  const requested = pathname === '/' ? '/index.html' : pathname;
+  const relativePath = normalize(requested).replace(/^[/\\]+/, '');
+  const filePath = join(publicDir, relativePath);
+  if (!filePath.startsWith(publicDir)) return sendJson(res, 404, { ok: false, error: 'Not found' });
+  try {
+    const details = await stat(filePath);
+    if (!details.isFile()) return sendJson(res, 404, { ok: false, error: 'Not found' });
+    res.writeHead(200, { 'content-type': mimeTypes[extname(filePath)] || 'application/octet-stream', 'cache-control': 'no-store' });
+    createReadStream(filePath).pipe(res);
+  } catch {
+    sendJson(res, 404, { ok: false, error: 'Not found' });
+  }
+};
+
+export const createApp = ({ store, artifactDir, auth }) => createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://worker.local');
+  if (req.method === 'GET' && url.pathname === '/health') {
+    return sendJson(res, 200, { ok: true, service: 'career-ops-worker', artifactDir, review_store: 'ready' });
+  }
+  if (!isAuthorized(req, auth)) return sendUnauthorized(res);
+
+  try {
+    if (req.method === 'GET' && url.pathname === '/api/review/items') {
+      const status = url.searchParams.get('status');
+      if (status && !['pending', 'approved', 'rejected', 'expired'].includes(status)) return sendJson(res, 400, { ok: false, error: 'unknown status filter' });
+      return sendJson(res, 200, { ok: true, items: await store.list({ status }) });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/review/items') {
+      const item = await store.create(await readJson(req));
+      return sendJson(res, 201, { ok: true, item });
+    }
+    const decisionMatch = url.pathname.match(/^\/api\/review\/items\/([^/]+)\/decision$/);
+    if (req.method === 'POST' && decisionMatch) {
+      const item = await store.decide(decisionMatch[1], await readJson(req));
+      return sendJson(res, 200, { ok: true, item, next: item.decisions.at(-1).action === 'approve' ? 'Approval recorded. An orchestrator may now prepare a supervised next step.' : 'Decision recorded.' });
+    }
+    if (req.method === 'POST' && ['/scan', '/verify', '/evaluate', '/generate'].includes(url.pathname)) {
+      return sendJson(res, 501, { ok: false, error: 'Not implemented', route: url.pathname, next: 'Add a provider-specific handler before enabling this route in n8n.' });
+    }
+    if (req.method === 'GET') return serveStatic(res, url.pathname);
+    sendJson(res, 404, { ok: false, error: 'Not found' });
+  } catch (error) {
+    const status = /not found/.test(error.message) ? 404 : 400;
+    sendJson(res, status, { ok: false, error: error.message });
+  }
+});
+
+const port = Number(process.env.PORT || 8080);
+const artifactDir = process.env.ARTIFACT_DIR || '/app/artifacts';
+const reviewDataDir = process.env.REVIEW_DATA_DIR || '/app/data';
+const reviewAuthUser = process.env.REVIEW_AUTH_USER || '';
+const reviewAuthPassword = process.env.REVIEW_AUTH_PASSWORD || '';
+
+if ((reviewAuthUser && !reviewAuthPassword) || (!reviewAuthUser && reviewAuthPassword)) {
+  throw new Error('REVIEW_AUTH_USER and REVIEW_AUTH_PASSWORD must be set together');
+}
+
+const store = new ReviewStore(join(reviewDataDir, 'review-items.json'));
+await store.initialize();
+
+const server = createApp({
+  store,
+  artifactDir,
+  auth: { user: reviewAuthUser, password: reviewAuthPassword }
 });
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`career-ops-worker listening on ${port}`);
+  if (!reviewAuthUser && !reviewAuthPassword) console.warn('Review authentication is disabled; keep the review dashboard bound to localhost.');
 });
-

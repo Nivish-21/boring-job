@@ -6,10 +6,10 @@ This is a separate Docker scaffold for the Career-Ops automation layer. It does 
 
 - `n8n` — orchestration, schedules, Notion updates, LLM calls, and approval waits.
 - `postgres` — durable n8n execution/state storage.
-- `worker` — private HTTP service placeholder for fetching, verification, PDF generation, and browser-assisted work.
+- `worker` — internal HTTP service with a health endpoint and a local review-queue API; provider adapters remain to be added.
 - `data/artifacts` — local output volume for reports and generated documents.
 - `contracts/approval.json` — channel-neutral approval payload shape.
-- `review/` — placeholder for the local review UI/API.
+- `review/` — documentation for the local review dashboard/API served by the worker.
 
 ## Start locally
 
@@ -20,7 +20,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Open n8n at `http://localhost:5678`. Do not expose this directly to the public internet yet. HTTPS, authentication, backups, and a private review surface must be configured before remote access or webhooks are enabled.
+Open n8n at `http://localhost:5678` and the local review queue at `http://localhost:8080`. Do not expose either directly to the public internet yet. The review dashboard remains localhost-only by default; set its Basic Auth credentials before any remote exposure.
 
 ## Intended approval flow
 
@@ -39,7 +39,7 @@ Telegram, email, Matrix, or Notion status changes can be added later as notifica
 - ATS/API adapters
 - Apify fallback
 - browser login or submission
-- local review dashboard
+- ATS/provider adapters, LLM evaluation, and PDF generation
 - Telegram/email integrations
 
 Never put browser cookies, API keys, or candidate identity documents in workflow JSON or source control.

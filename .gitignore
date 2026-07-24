@@ -2,6 +2,6 @@
 data/n8n/*
 data/postgres/*
 data/artifacts/*
+data/review/*
 !data/**/.gitkeep
 npm-debug.log*
-
