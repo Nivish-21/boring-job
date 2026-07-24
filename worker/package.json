@@ -1,0 +1,9 @@
+{
+  "name": "career-ops-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs"
+  }
+}
+

@@ -1,0 +1,7 @@
+.env
+data/n8n/*
+data/postgres/*
+data/artifacts/*
+!data/**/.gitkeep
+npm-debug.log*
+

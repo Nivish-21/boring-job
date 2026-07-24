@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Career-Ops approval request",
+  "type": "object",
+  "required": ["id", "item_id", "version", "action", "status", "expires_at"],
+  "properties": {
+    "id": { "type": "string", "description": "Opaque, single-use approval identifier" },
+    "item_id": { "type": "string" },
+    "version": { "type": "integer", "minimum": 1 },
+    "action": { "enum": ["application_submit", "message_send", "regenerate", "reject"] },
+    "status": { "enum": ["pending", "approved", "rejected", "expired", "consumed"] },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "actor": { "type": ["string", "null"] },
+    "reason": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}
+
