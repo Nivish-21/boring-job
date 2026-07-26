@@ -5,6 +5,10 @@ import { timingSafeEqual } from 'node:crypto';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ReviewStore } from './review-store.mjs';
+import { selectProvider } from './provider-selector.mjs';
+import { verifyJob } from './job-verifier.mjs';
+import { PipelineStore } from './pipeline-store.mjs';
+import { JobPipeline } from './job-pipeline.mjs';
 
 const moduleDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(moduleDir, '..', 'public');
@@ -64,7 +68,7 @@ const serveStatic = async (res, pathname) => {
   }
 };
 
-export const createApp = ({ store, artifactDir, auth }) => createServer(async (req, res) => {
+export const createApp = ({ store, pipeline, artifactDir, auth }) => createServer(async (req, res) => {
   const url = new URL(req.url, 'http://worker.local');
   if (req.method === 'GET' && url.pathname === '/health') {
     return sendJson(res, 200, { ok: true, service: 'career-ops-worker', artifactDir, review_store: 'ready' });
@@ -80,6 +84,21 @@ export const createApp = ({ store, artifactDir, auth }) => createServer(async (r
     if (req.method === 'POST' && url.pathname === '/api/review/items') {
       const item = await store.create(await readJson(req));
       return sendJson(res, 201, { ok: true, item });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/providers/resolve') {
+      const input = await readJson(req);
+      return sendJson(res, 200, { ok: true, selection: selectProvider(input.source_url) });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/jobs/verify') {
+      const input = await readJson(req);
+      const result = await verifyJob(input.source_url);
+      const status = result.liveness === 'closed' ? 410 : 200;
+      return sendJson(res, status, { ok: result.liveness === 'live', result });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/pipeline/jobs') {
+      if (!pipeline) return sendJson(res, 503, { ok: false, error: 'job pipeline is unavailable' });
+      const result = await pipeline.process(await readJson(req));
+      return sendJson(res, 200, { ok: ['needs_review', 'duplicate'].includes(result.stage), result });
     }
     const decisionMatch = url.pathname.match(/^\/api\/review\/items\/([^/]+)\/decision$/);
     if (req.method === 'POST' && decisionMatch) {
@@ -97,26 +116,28 @@ export const createApp = ({ store, artifactDir, auth }) => createServer(async (r
   }
 });
 
-const port = Number(process.env.PORT || 8080);
-const artifactDir = process.env.ARTIFACT_DIR || '/app/artifacts';
-const reviewDataDir = process.env.REVIEW_DATA_DIR || '/app/data';
-const reviewAuthUser = process.env.REVIEW_AUTH_USER || '';
-const reviewAuthPassword = process.env.REVIEW_AUTH_PASSWORD || '';
+export const startWorker = async ({
+  port = Number(process.env.PORT || 8080),
+  artifactDir = process.env.ARTIFACT_DIR || '/app/artifacts',
+  reviewDataDir = process.env.REVIEW_DATA_DIR || '/app/data',
+  auth = { user: process.env.REVIEW_AUTH_USER || '', password: process.env.REVIEW_AUTH_PASSWORD || '' }
+} = {}) => {
+  if ((auth.user && !auth.password) || (!auth.user && auth.password)) {
+    throw new Error('REVIEW_AUTH_USER and REVIEW_AUTH_PASSWORD must be set together');
+  }
 
-if ((reviewAuthUser && !reviewAuthPassword) || (!reviewAuthUser && reviewAuthPassword)) {
-  throw new Error('REVIEW_AUTH_USER and REVIEW_AUTH_PASSWORD must be set together');
-}
+  const store = new ReviewStore(join(reviewDataDir, 'review-items.json'));
+  await store.initialize();
+  const pipelineStore = new PipelineStore(join(reviewDataDir, 'pipeline-jobs.json'));
+  await pipelineStore.initialize();
+  const pipeline = new JobPipeline({ store: pipelineStore, reviewStore: store, artifactDir });
+  const server = createApp({ store, pipeline, artifactDir, auth });
 
-const store = new ReviewStore(join(reviewDataDir, 'review-items.json'));
-await store.initialize();
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`career-ops-worker listening on ${port}`);
+    if (!auth.user && !auth.password) console.warn('Review authentication is disabled; keep the review dashboard bound to localhost.');
+  });
+  return server;
+};
 
-const server = createApp({
-  store,
-  artifactDir,
-  auth: { user: reviewAuthUser, password: reviewAuthPassword }
-});
-
-server.listen(port, '0.0.0.0', () => {
-  console.log(`career-ops-worker listening on ${port}`);
-  if (!reviewAuthUser && !reviewAuthPassword) console.warn('Review authentication is disabled; keep the review dashboard bound to localhost.');
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await startWorker();

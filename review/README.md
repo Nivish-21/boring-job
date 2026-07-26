@@ -28,6 +28,14 @@ ID expires after 48 hours and is consumed after approval or rejection. A
 regenerate request keeps the item in the queue with the same approval token.
 An orchestrator must still perform a separate, supervised next step.
 
+Decision meanings:
+
+- `approve` records that the current packet can move to the next supervised step.
+- `reject` records that this packet should not be used as-is and closes the item.
+- `regenerate` records that the item should stay pending while the orchestrator builds a revised draft.
+
+This surface records decisions only. It does not submit an application or send a message.
+
 Each item shows:
 
 - source job/founder evidence;
