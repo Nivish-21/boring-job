@@ -248,6 +248,41 @@ test('adds Suggested resume and Company links sections when a resumeClassifier a
     assert.match(artifact, /## Company links/);
     assert.match(artifact, /https:\/\/acme\.com/);
     assert.match(artifact, /linkedin\.com\/company\/acme/);
+    assert.doesNotMatch(artifact, /Reference resume excerpt/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('includes a capped reference-resume excerpt when the matched bucket has extracted text', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const buckets = [{
+    id: '01',
+    target_role: 'Backend Software Engineer',
+    pdf_path: '/app/resumes/01-Backend.pdf',
+    positioning_angle: 'Node + Python depth',
+    reference_text: `Shipped production systems solo. ${'Long real resume text. '.repeat(100)}`
+  }];
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob,
+    resumeBuckets: buckets,
+    resumeClassifier: async () => ({ bucket_id: '01', confidence: 0.9, reason: 'Strong match' })
+  });
+
+  try {
+    const result = await pipeline.process({ source_url: verifiedJob.source_url });
+    const artifact = await readFile(result.artifact_path, 'utf8');
+    assert.match(artifact, /## Reference resume excerpt/);
+    assert.match(artifact, /Shipped production systems solo\./);
+    const excerptMatch = artifact.match(/Reference resume excerpt[^\n]*\n\n([\s\S]*?)\n\n##/);
+    assert.ok(excerptMatch, 'expected the excerpt block to be present');
+    assert.ok(excerptMatch[1].length <= 1200, `excerpt should be capped at 1200 chars, got ${excerptMatch[1].length}`);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

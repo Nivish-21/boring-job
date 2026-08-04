@@ -248,3 +248,22 @@ sidebar checkbox list.
 manageable, easily understandable") and avoids two divergent copies of the same card-rendering
 logic. Client-side merge (not a new backend endpoint) was chosen because both existing endpoints
 already return everything needed — no new server-side work or schema change required.
+
+## 2026-08-04 — Resume reference text extracted outside the git repo, not into `docs/`
+
+**Context:** User asked for the LLM to use the actual 8 resumes (structure, tone, real
+experience) as reference material when generating packet drafts, and specifically asked to copy
+the resume files into `docs/`.
+
+**Decision:** Extracted each resume's text via `firecrawl parse` into a new `reference/`
+subfolder inside the existing `~/Desktop/Nivish_Tailored_Resumes/` directory — outside the git
+repo entirely — instead of copying the files (or their text) into `docs/`. The worker already
+bind-mounts that whole directory read-only (`RESUME_HOST_DIR`), so no `compose.yml` change was
+needed; `resume-catalog.mjs` just reads one more file per bucket.
+
+**Reasoning:** The resumes carry real PII — full name, phone, email, complete work history.
+`docs/` is committed and pushed to GitHub every session; putting that data there would put it in
+git history permanently (only removable by rewriting history) on a repo actively being pushed.
+Flagged this to the user before building anything; they approved the `reference/` approach as
+proposed. Functionally identical outcome (the LLM gets real resume text as context) with zero
+PII ever touching git.

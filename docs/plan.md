@@ -314,6 +314,42 @@ individual posting — not an eligibility-tuning problem, the wrong kind of page
       12 existing jobs, status/company/fit-score filters all work, clear-filters resets to
       show everything. 78/78 tests still passing (no backend change needed).
 
+## New task block: resume content as LLM reference material (2026-08-04)
+
+**Goal:** Right now `resume-catalog.mjs` only reads the README table's metadata (target role,
+fit score, positioning angle) for each of the 8 resumes — the packet draft never sees the
+actual resume text. User wants the LLM to reference the real resumes (structure, tone, actual
+experience/phrasing) when generating packet drafts, so it can reuse real, already-approved
+content instead of re-deriving from scratch or re-asking questions the resumes already answer.
+
+**Flagged before planning further (see `docs/decisions.md` for the full note):** the user's
+literal ask was to copy the 8 resume files into `docs/` in this repo. `docs/` is committed and
+pushed to GitHub every session; the resumes contain full name, contact details, and complete
+work history — real PII. Recommending against that specific location: putting them in git means
+that data is in git history permanently (only removable by rewriting history), on a repo
+actively being pushed. Proposed alternative below keeps the same benefit without that exposure.
+
+**Approved 2026-08-04 — built as proposed:**
+- [x] Extracted each resume's PDF to plain text (`firecrawl parse -f markdown`) into a new
+      `reference/` subfolder inside `~/Desktop/Nivish_Tailored_Resumes/` — already bind-mounted
+      read-only into the worker via `RESUME_HOST_DIR`, never part of this git repo. All 8
+      extracted and verified readable (real name/contact/experience text confirmed present,
+      confirming this data never needs to touch git to reach the worker).
+- [x] `worker/src/resume-catalog.mjs` — `loadResumeCatalog` now also reads each bucket's
+      `reference/<id>-<file>.txt` and attaches it as `reference_text`; degrades to `null` if the
+      extraction is missing for a given bucket (doesn't fail catalog load).
+- [x] `worker/src/job-pipeline.mjs`'s `packetDraft()` — when a matched resume bucket has
+      `reference_text`, includes a capped (1,200-char, via the existing `cleanText` helper)
+      excerpt under a "Reference resume excerpt" heading, alongside the existing target-role/
+      positioning-angle line.
+- [x] Tests: `resume-catalog.test.mjs` (new field + reference_text load/degrade), `job-pipeline
+      .test.mjs` (excerpt present + capped when reference_text exists, absent when it doesn't).
+      80/80 passing project-wide.
+- [x] Verified live: rebuilt the image, confirmed `/app/resumes/reference/` is visible inside
+      the running container via the existing mount (no `compose.yml` change needed), and
+      confirmed `loadResumeCatalog()` actually attaches real extracted text at runtime.
+- [x] `docs/decisions.md` — logged.
+
 ## Out of scope (this block)
 
 - Founder/personal contact discovery, LinkedIn profile scraping, or outreach

@@ -211,3 +211,25 @@ passing.
 **Verified live:** rebuilt the image, checked in-browser — all 12 existing jobs render in the
 unified list, status checkboxes/company search/fit-score filters all narrow the list correctly,
 clear-filters resets to show everything.
+
+## 2026-08-04 — Resume text as LLM reference material for packet drafts
+
+Extracted each of the 8 tailored resumes to plain text and wired it into draft generation as
+reference context (see `docs/decisions.md` for the PII/location reasoning).
+
+**Added:**
+- `~/Desktop/Nivish_Tailored_Resumes/reference/*.txt` (outside this repo) — one text extraction
+  per resume via `firecrawl parse -f markdown`.
+
+**Changed:**
+- `worker/src/resume-catalog.mjs` — `loadResumeCatalog` now attaches `reference_text` per
+  bucket from `reference/<id>-<file>.txt`, degrading to `null` if that file is missing.
+- `worker/src/job-pipeline.mjs` — `packetDraft()` includes a capped (1,200-char) excerpt of the
+  matched bucket's `reference_text` under "Reference resume excerpt" when present.
+
+**Tests:** 2 new (`resume-catalog.test.mjs` reference_text load/degrade,
+`job-pipeline.test.mjs` excerpt present + capped). 80/80 passing project-wide.
+
+**Verified live:** rebuilt the image, confirmed `/app/resumes/reference/` is visible in the
+running container through the existing bind mount, and confirmed `loadResumeCatalog()` attaches
+real extracted text at runtime (no `compose.yml` change needed).

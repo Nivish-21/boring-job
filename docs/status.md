@@ -15,14 +15,13 @@ everything else works. 78/78 tests passing; `docker compose config --quiet` vali
 
 ## Active plan
 
-Dashboard redesign is done, verified live, and pushed. Next: wire up
-`workflows/scheduled-job-discovery.json` in n8n for real unattended daily runs (user's stated
-next step). Also pending: a new task the user raised mid-session — using the 8 real resume
-files (not just their README metadata) as reference material for the LLM when generating
-packet drafts, so structure/tone/experience details can be reused instead of re-derived or
-re-asked. Flagged a real tradeoff before building (see `docs/decisions.md` once logged) and
-proposing a plan block for approval before touching any code. `OPENAI_API_KEY` from the user
-when ready (optional, resume-bucket auto-suggestion only).
+Dashboard redesign is done, verified live, and pushed. Resume reference-text task is also done:
+each of the 8 resumes extracted to text outside the git repo
+(`~/Desktop/Nivish_Tailored_Resumes/reference/`) and wired into packet-draft generation as
+capped reference context — approved after flagging the PII/git-history tradeoff (see
+`docs/decisions.md`). Next: wire up `workflows/scheduled-job-discovery.json` in n8n for real
+unattended daily runs (user's stated next step). `OPENAI_API_KEY` from the user when ready
+(optional, resume-bucket auto-suggestion only).
 
 ## Major decisions
 

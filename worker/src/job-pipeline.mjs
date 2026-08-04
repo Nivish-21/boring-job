@@ -63,7 +63,8 @@ const packetDraft = (job, evaluation, candidate, { resumeBucket, companyLinks } 
   const name = cleanText(candidate?.name, 120) || 'Candidate';
   const facts = Array.isArray(candidate?.verified_facts) ? candidate.verified_facts.map((fact) => cleanText(fact, 280)).filter(Boolean).slice(0, 5) : [];
   const factLines = facts.length ? facts.map((fact) => `- ${fact}`).join('\n') : '- Add verified candidate facts before using this draft.';
-  const resumeSection = resumeBucket ? `\n## Suggested resume\n\n- ${resumeBucket.target_role} (${resumeBucket.pdf_path})\n- Positioning: ${resumeBucket.positioning_angle}\n` : '';
+  const referenceExcerpt = resumeBucket?.reference_text ? cleanText(resumeBucket.reference_text, 1200) : '';
+  const resumeSection = resumeBucket ? `\n## Suggested resume\n\n- ${resumeBucket.target_role} (${resumeBucket.pdf_path})\n- Positioning: ${resumeBucket.positioning_angle}\n${referenceExcerpt ? `\n### Reference resume excerpt (structure/tone/experience only — verify before reuse)\n\n${referenceExcerpt}\n` : ''}` : '';
   const companyLines = [
     companyLinks?.website_url ? `- Website: ${companyLinks.website_url}` : null,
     companyLinks?.linkedin_url ? `- LinkedIn: ${companyLinks.linkedin_url}` : null
