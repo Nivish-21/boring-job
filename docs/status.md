@@ -60,6 +60,15 @@ committed). 9 of 176 flagged founders processed so far; re-running `POST /api/fo
 against that same file picks up the next batch of the remaining 167 automatically
 (already-processed ones are skipped).
 
+**Explicit instruction for next session:** founder-outreach is fully working end-to-end against
+real data — do not re-derive the architecture or ask setup questions already answered. Open by
+checking, in order: (1) has `FIRECRAWL_API_KEY`/`APIFY_API_TOKEN`/`OPENAI_API_KEY` been rotated
+yet (grep `.env` for presence only, never print values — see the security-incident note above);
+(2) has the user reviewed/decided on the 9 pending founder drafts in the dashboard, especially
+the Aravind Jayendran/LatentForce-vs-LatentGraph one; (3) whether they want the next batch of the
+remaining 167 flagged founders imported. Do not ask for the CSV — it already exists at
+`worker/founder-outreach/import.zip/Connections.csv`.
+
 `DISCOVERY_SCHEDULE_ENABLED` is still off by default for the existing job-discovery pipeline —
 turn on when the user wants real unattended daily runs.
 
