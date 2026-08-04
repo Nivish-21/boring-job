@@ -123,17 +123,20 @@ const renderCard = (card) => {
   fragment.querySelector('.source-link').href = card.source_url;
 
   const details = fragment.querySelector('.details');
+  const fitClass = typeof card.fit_score === 'number' ? (card.fit_score >= 7 ? 'fit-good' : card.fit_score >= 5 ? 'fit-maybe' : 'fit-poor') : null;
   const fields = [
-    ['Fit score', typeof card.fit_score === 'number' ? `${card.fit_score}/10` : null],
+    ['Discovered', formatDate(card.created_at)],
+    ['Fit score', typeof card.fit_score === 'number' ? `${card.fit_score}/10` : null, fitClass],
     ['Location', card.location],
     ['Expires', card.status === 'pending' ? formatDate(card.expires_at) : null],
     ['Last updated', card.status !== 'pending' && card.updated_at ? formatDate(card.updated_at) : null]
   ];
-  fields.filter(([, value]) => value).forEach(([label, value]) => {
+  fields.filter(([, value]) => value).forEach(([label, value, className]) => {
     const term = document.createElement('dt');
     term.textContent = label;
     const definition = document.createElement('dd');
     definition.textContent = value;
+    if (className) definition.classList.add(className);
     details.append(term, definition);
   });
 

@@ -233,3 +233,23 @@ reference context (see `docs/decisions.md` for the PII/location reasoning).
 **Verified live:** rebuilt the image, confirmed `/app/resumes/reference/` is visible in the
 running container through the existing bind mount, and confirmed `loadResumeCatalog()` attaches
 real extracted text at runtime (no `compose.yml` change needed).
+
+## 2026-08-04 — Dark theme, explicit "Discovered" timestamp, fit-score colour coding
+
+Small dashboard follow-ups from using the n8n import side-by-side with the (previously
+light-themed) dashboard.
+
+**Changed:**
+- `worker/public/styles.css` — full palette switched from light to dark (`color-scheme: dark`,
+  near-black background, light text), matching n8n's own dark UI so switching tabs doesn't
+  flash bright white. Added `--warn`/`--danger-bg` tokens and `.fit-good`/`.fit-maybe`/
+  `.fit-poor` classes.
+- `worker/public/index.html` — `<meta name="color-scheme">` updated to `dark`.
+- `worker/public/app.js` — every card now shows an explicit "Discovered" row with the full
+  date/time (previously only in the small meta subtitle). Fit score is colour-coded using the
+  same thresholds as `evaluateJob()`'s own recommendation buckets (`>=7` green/apply, `>=5`
+  amber/maybe, below red/skip) for at-a-glance scanning.
+
+**Tests:** no backend change; 80/80 still passing. Verified live in-browser: dark palette
+renders correctly, low fit scores (2/10, 4/10) render in red, Discovered row present on every
+card.
