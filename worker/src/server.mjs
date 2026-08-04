@@ -14,6 +14,7 @@ import { loadResumeCatalog } from './resume-catalog.mjs';
 import { lookupCompany } from './company-lookup.mjs';
 import { classifyResumeBucket } from './fit-evaluator.mjs';
 import { discoverJobUrls, verifyDiscoveredUrl, DiscoveryRunner } from './job-discovery.mjs';
+import { getFirecrawlUsage, getApifyUsage } from './usage-tracker.mjs';
 
 const moduleDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(moduleDir, '..', 'public');
@@ -73,7 +74,7 @@ const serveStatic = async (res, pathname) => {
   }
 };
 
-export const createApp = ({ store, pipeline, discoveryRunner, artifactDir, auth }) => createServer(async (req, res) => {
+export const createApp = ({ store, pipeline, discoveryRunner, artifactDir, auth, firecrawlApiKey, apifyApiToken }) => createServer(async (req, res) => {
   const url = new URL(req.url, 'http://worker.local');
   if (req.method === 'GET' && url.pathname === '/health') {
     return sendJson(res, 200, { ok: true, service: 'career-ops-worker', artifactDir, review_store: 'ready' });
@@ -109,6 +110,13 @@ export const createApp = ({ store, pipeline, discoveryRunner, artifactDir, auth 
       if (!discoveryRunner) return sendJson(res, 503, { ok: false, error: 'discovery runner is unavailable' });
       const result = await discoveryRunner.run();
       return sendJson(res, 200, { ok: true, result });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/usage') {
+      const [firecrawl, apify] = await Promise.all([
+        getFirecrawlUsage({ apiKey: firecrawlApiKey }),
+        getApifyUsage({ apiToken: apifyApiToken })
+      ]);
+      return sendJson(res, 200, { ok: true, firecrawl, apify });
     }
     const decisionMatch = url.pathname.match(/^\/api\/review\/items\/([^/]+)\/decision$/);
     if (req.method === 'POST' && decisionMatch) {
@@ -180,7 +188,7 @@ export const startWorker = async ({
     apiKey: firecrawlApiKey,
     limit: dailyCap * 2
   });
-  const server = createApp({ store, pipeline, discoveryRunner, artifactDir, auth });
+  const server = createApp({ store, pipeline, discoveryRunner, artifactDir, auth, firecrawlApiKey, apifyApiToken });
 
   server.listen(port, '0.0.0.0', () => {
     console.log(`career-ops-worker listening on ${port}`);

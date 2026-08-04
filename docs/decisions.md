@@ -106,3 +106,45 @@ post-verification stable IDs always agree, with no extra network cost to compute
 live: a second discovery run against the same default query showed 5 of 6 discovered URLs
 short-circuit to `duplicate` with zero Firecrawl/Apify calls, and Apify wasn't invoked at all
 that run.
+
+---
+
+## 2026-08-04 — Node/TypeScript stack confirmed, not migrated to Python/FastAPI
+
+**Context:** User raised whether this project should have been Python/FastAPI instead of Node —
+they're actively learning Python and job-hunting for Python/FastAPI roles, so there's a real
+personal-development angle, not just idle curiosity.
+
+**Decision:** Keep Node. No migration.
+
+**Reasoning:** `PLAN.md`'s original scaffold specified a Node/TypeScript worker before this
+build started; there was no technical requirement favoring either stack for this workload (I/O-
+bound HTTP calls + JSON file storage + a lightweight server). The pipeline is now fully built,
+71/71 tests passing, and live-verified against real Firecrawl/Apify traffic — a rewrite would
+be pure churn (redo the HTTP server, the atomic-JSON stores, every provider client, every test)
+for zero functional gain. User agreed and will pursue Python learning through a separate,
+unrelated project instead.
+
+---
+
+## 2026-08-04 — Firecrawl/Apify usage tracking added to the review dashboard
+
+**Context:** User wants to see Firecrawl and Apify credit/spend in the review dashboard instead
+of checking each provider's website daily — motivated directly by the cost issues found in the
+first live run (see the two entries above).
+
+**Decision:** New `worker/src/usage-tracker.mjs` module (`getFirecrawlUsage`, `getApifyUsage`),
+a new auth-gated `GET /api/usage` route, and a small read-only usage strip in the dashboard
+header, fetched on page load and on manual refresh — no polling loop, no historical graphs, no
+alerting/thresholds beyond a simple in-page color change at ≤20% remaining.
+
+**Verified endpoints (against real accounts, not documentation alone):**
+- Firecrawl: `GET https://api.firecrawl.dev/v2/team/credit-usage` (Bearer auth) →
+  `{remainingCredits, planCredits, billingPeriodStart, billingPeriodEnd}`.
+- Apify: `GET https://api.apify.com/v2/users/me/limits?token=<token>` →
+  `current.monthlyUsageUsd` vs `limits.maxMonthlyUsageUsd`, plus `monthlyUsageCycle`.
+
+**Reasoning:** Both are lightweight account/billing metadata endpoints, structurally distinct
+from paid scrape/search operations — reading current balance this way needs no local usage
+counter or extra bookkeeping, and reflects the provider's own authoritative number rather than
+an estimate the pipeline could get out of sync with.

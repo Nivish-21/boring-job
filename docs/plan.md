@@ -215,6 +215,43 @@ downstream is already fully specified and implemented above.
   if volume becomes an issue, restrict it to `apply`/`maybe` recommendations
   only, not every discovered posting.
 
+## New task block: provider credit-usage tracking in the review dashboard (2026-08-04)
+
+**Goal:** Surface Firecrawl and Apify credit/usage spend directly in the existing review
+dashboard (`localhost:8080`), so the user doesn't have to check each provider's website daily.
+
+**Verified against real accounts (not assumed):**
+- Firecrawl: `GET https://api.firecrawl.dev/v2/team/credit-usage` (same Bearer auth as every
+  other Firecrawl call) → `{remainingCredits, planCredits, billingPeriodStart,
+  billingPeriodEnd}`.
+- Apify: `GET https://api.apify.com/v2/users/me/limits?token=<token>` →
+  `current.monthlyUsageUsd` vs `limits.maxMonthlyUsageUsd`, plus `monthlyUsageCycle.startAt`/
+  `endAt`.
+- Both are account/billing metadata endpoints, distinct from scrape/search operations — nothing
+  in either response suggests checking them costs credits, but this is an inference from
+  endpoint shape, not a documented guarantee.
+
+**Steps:**
+- [x] `worker/src/usage-tracker.mjs` — `getFirecrawlUsage({apiKey, fetchImpl})` and
+      `getApifyUsage({apiToken, fetchImpl})`, thin fetch wrappers matching the existing
+      `firecrawl-client.mjs`/`apify-client.mjs` pattern (injectable `fetchImpl`, normalize to
+      snake_case, degrade to `{error: '...'}` on failure or missing key rather than throwing —
+      this is a monitoring nicety, not a pipeline-blocking dependency).
+- [x] `worker/src/server.mjs` — new route `GET /api/usage`, auth-gated like every other API
+      route, calls both and returns `{ok, firecrawl, apify}`.
+- [x] `worker/public/` — usage strip in the dashboard header ("Firecrawl: 1,377 / 1,000 left"
+      · "Apify: $4.82 / $5 left", both with their reset date), fetched once on page load
+      alongside the existing queue load and again on manual refresh — no polling loop. Turns
+      red (`.usage-warn`) when remaining drops to 20% or less of plan. Verified live in-browser
+      against real Firecrawl/Apify accounts, plus a manual DOM check of the warning state.
+- [x] Tests: `worker/test/usage-tracker.test.mjs` (7 tests, mocked `fetchImpl`) and a
+      `server.test.mjs` case asserting no network call happens when neither key is configured.
+      71/71 passing project-wide.
+- [x] `docs/decisions.md`/`docs/changelog.md`/`docs/status.md` — logged.
+
+**Out of scope:** historical usage graphs, alerting/thresholds, per-run cost attribution.
+Just current balance vs. plan limit, refreshed on dashboard load — a v1 read-only view.
+
 ## Out of scope (this block)
 
 - Founder/personal contact discovery, LinkedIn profile scraping, or outreach

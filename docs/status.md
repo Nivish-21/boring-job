@@ -4,26 +4,17 @@ _Last updated: 2026-08-04_
 
 ## Current state
 
-The automated daily job discovery pipeline is built and has now run live for the first time
-against real Firecrawl and Apify credentials (`FIRECRAWL_API_KEY`/`APIFY_API_TOKEN` supplied;
-`OPENAI_API_KEY` still not supplied — resume classification degrades to `null` as designed,
-everything else works). That first run surfaced two real bugs, both fixed and verified live:
-Firecrawl's circuit breaker was misclassifying a per-URL rejection as account-wide quota
-exhaustion (indefinite disable), and the pipeline was paying for Firecrawl/Apify verification
-on URLs it had already fully processed, with no way to ever stop. 63/63 tests passing;
-`docker compose config --quiet` validates clean.
+The automated daily job discovery pipeline is built, live-tested against real Firecrawl/Apify
+credentials, and now includes a usage-tracking strip in the review dashboard. `OPENAI_API_KEY`
+still not supplied — resume classification degrades to `null` as designed, everything else
+works. Two real cost bugs found in the first live run were fixed and verified live (see
+`docs/decisions.md`). 71/71 tests passing; `docker compose config --quiet` validates clean.
 
 ## Active plan
 
-`docs/plan.md` — "Automated daily job discovery pipeline" build is complete and live-verified.
-Two things in flight:
-
-1. `OPENAI_API_KEY` still needed from the user for automatic resume-bucket suggestions
-   (everything else already works without it).
-2. A credit/usage-tracking feature for Firecrawl and Apify was requested, to surface spend in
-   the review dashboard instead of checking each provider's website daily — being scoped as a
-   new plan block (see `docs/plan.md`), pending an approach decision on what each provider's
-   API actually exposes.
+`docs/plan.md` — build is complete and live-verified end to end, including the new usage
+strip. Only remaining: `OPENAI_API_KEY` from the user for automatic resume-bucket suggestions
+(everything else already works without it).
 
 ## Major decisions
 
@@ -39,6 +30,10 @@ See `docs/decisions.md` for full reasoning. Summary:
 - `JobPipeline.process()` now dedupes by a locally-computed provider stable ID *before* calling
   `verify()`, and persists non-live (`manual_review`/`expired`) outcomes so a dead URL is never
   re-verified at cost again.
+- Stack stays Node, not migrated to Python/FastAPI — user is learning Python but agreed a
+  rewrite of an already-built, live-verified pipeline would be pure churn.
+- Firecrawl/Apify usage tracking reads each provider's own account/billing endpoint directly
+  (no local usage counter) — `GET /v2/team/credit-usage` and `GET /v2/users/me/limits`.
 
 ## Minor decisions
 
@@ -53,25 +48,26 @@ See `docs/decisions.md` for full reasoning. Summary:
   — overridable via `.env`, defaults to the path already in use.
 - First live test run used `DAILY_LEAD_CAP=3` deliberately, to limit spend before the pipeline
   had ever been proven against real APIs.
+- Usage strip has no polling loop and no historical graph — fetched on page load/manual
+  refresh only, current balance vs. plan limit, red at ≤20% remaining. A deliberately small v1.
 
 ## Known issues / open risks
 
 - Apify actor choice (`apify~website-content-crawler`) is still unconfirmed as the best fit —
   only a few real runs seen so far.
-- Free-tier/paid quotas (Firecrawl, Apify) are finite. The circuit breaker and the new
-  pre-verification dedup both reduce spend, but there's still no in-product visibility into
-  actual credit usage — that's the requested next feature.
-- `/api/discovery/run` is gated by the same Basic Auth as every other worker route once
-  `REVIEW_AUTH_USER`/`REVIEW_AUTH_PASSWORD` are set — the n8n workflow's HTTP Request node
-  needs that credential attached or the scheduled run will 401 (documented in
+- `/api/discovery/run` (and now `/api/usage`) are gated by the same Basic Auth as every other
+  worker route once `REVIEW_AUTH_USER`/`REVIEW_AUTH_PASSWORD` are set — the n8n workflow's HTTP
+  Request node needs that credential attached or the scheduled run will 401 (documented in
   `workflows/README.md`).
 - A Docker Desktop BuildKit hiccup (`DeadlineExceeded` resolving the `node:22-alpine` base
-  image, despite Docker Hub itself being reachable) blocked one rebuild; worked around with
-  `docker build --pull=false` to force the local image cache. Not a code issue — flagging in
-  case it recurs.
+  image, despite Docker Hub itself being reachable) blocked rebuilds a few times this session;
+  worked around with `docker build --pull=false` to force the local image cache. Not a code
+  issue — flagging in case it recurs.
+- `worker/public/` is baked into the Docker image at build time (`COPY public ./public`), not
+  bind-mounted — any future dashboard edit needs an image rebuild to take effect, not just a
+  page refresh. Bit us once this session.
 
 ## Next steps
 
-1. User supplies `OPENAI_API_KEY` (optional, but needed for resume-bucket auto-suggestion).
-2. Scope and build the Firecrawl/Apify credit-usage tracking feature — pending research into
-   what each provider's API actually exposes (in progress).
+User supplies `OPENAI_API_KEY` when ready. No other blockers — the pipeline, dashboard, and
+usage tracking are all live and working.

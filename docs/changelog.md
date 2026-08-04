@@ -97,6 +97,27 @@ known-dead URL.
 short-circuited to `duplicate` with zero Firecrawl/Apify calls; Apify wasn't invoked at all that
 run. 63/63 tests passing project-wide.
 
-**Not yet done:** `OPENAI_API_KEY` still needed for resume-bucket classification; a
-credit/usage-tracking feature for the review dashboard was requested and is being scoped
-separately (see `docs/plan.md`).
+**Not yet done:** `OPENAI_API_KEY` still needed for resume-bucket classification.
+
+## 2026-08-04 — Firecrawl/Apify usage tracking in the review dashboard
+
+Added a read-only usage strip to the review dashboard so the user can see current Firecrawl and
+Apify spend without checking each provider's website (see `docs/decisions.md`).
+
+**Added:**
+- `worker/src/usage-tracker.mjs` — `getFirecrawlUsage`/`getApifyUsage`, thin fetch wrappers
+  matching the existing provider-client pattern, degrade to `{error: '...'}` rather than throw.
+- `worker/src/server.mjs` — new `GET /api/usage` route, auth-gated like every other API route.
+- `worker/public/` — usage strip in the dashboard header, fetched on page load and manual
+  refresh; turns red when either provider has 20% or less of its plan remaining.
+- `worker/test/usage-tracker.test.mjs` (7 tests) and a `server.test.mjs` case confirming no
+  network call happens when neither key is configured.
+
+**Verified:** endpoints confirmed against real Firecrawl/Apify accounts before building
+(`docs/decisions.md`); dashboard checked live in-browser showing real balances ("Firecrawl:
+1,377 / 1,000 left", "Apify: $4.82 / $5 left"), plus a manual DOM check of the warning-color
+state. 71/71 tests passing project-wide.
+
+**Also decided this session:** keep the project on Node rather than migrating to Python/
+FastAPI — user is learning Python but agreed a rewrite of an already-built, tested, live-
+verified pipeline would be pure churn (see `docs/decisions.md`).

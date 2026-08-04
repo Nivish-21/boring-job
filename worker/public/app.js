@@ -1,8 +1,10 @@
 const queue = document.querySelector('#queue');
+const usage = document.querySelector('#usage');
 const template = document.querySelector('#item-template');
 const refreshButton = document.querySelector('#refresh');
 
 const formatDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+const formatResetDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
 
 const showMessage = (message, type = 'info') => {
   queue.replaceChildren();
@@ -92,5 +94,37 @@ async function loadQueue() {
   }
 }
 
-refreshButton.addEventListener('click', loadQueue);
+const usagePill = (label, remaining, total, resetAt, unit = '') => {
+  const item = document.createElement('p');
+  item.className = 'usage-item';
+  if (typeof remaining === 'number' && typeof total === 'number' && total > 0) {
+    const remainingRatio = remaining / total;
+    if (remainingRatio <= 0.2) item.classList.add('usage-warn');
+    const formatAmount = (value) => value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const strong = document.createElement('strong');
+    strong.textContent = `${label}: ${unit}${formatAmount(remaining)} / ${unit}${formatAmount(total)} left`;
+    item.append(strong);
+    if (resetAt) item.append(` · resets ${formatResetDate(resetAt)}`);
+  } else {
+    item.textContent = `${label}: usage unavailable`;
+  }
+  return item;
+};
+
+async function loadUsage() {
+  try {
+    const response = await fetch('/api/usage');
+    const payload = await response.json();
+    if (!response.ok) throw new Error('Could not load usage');
+    usage.replaceChildren();
+    usage.append(usagePill('Firecrawl', payload.firecrawl?.remaining_credits, payload.firecrawl?.plan_credits, payload.firecrawl?.billing_period_end));
+    usage.append(usagePill('Apify', payload.apify?.max_monthly_usage_usd - payload.apify?.monthly_usage_usd, payload.apify?.max_monthly_usage_usd, payload.apify?.cycle_end, '$'));
+    usage.hidden = false;
+  } catch {
+    usage.hidden = true;
+  }
+}
+
+refreshButton.addEventListener('click', () => { loadQueue(); loadUsage(); });
 loadQueue();
+loadUsage();

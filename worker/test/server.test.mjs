@@ -146,3 +146,20 @@ test('returns 503 from the discovery endpoint when no discovery runner is config
     await close(server);
   }
 });
+
+test('returns firecrawl/apify usage errors without either key configured, with no network call', async () => {
+  const store = { list: async () => [] };
+  const server = await start({ store, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const response = await call(server, { path: '/api/usage' });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, {
+      ok: true,
+      firecrawl: { error: 'Firecrawl API key is not configured' },
+      apify: { error: 'Apify API token is not configured' }
+    });
+  } finally {
+    await close(server);
+  }
+});
