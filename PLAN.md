@@ -1,8 +1,26 @@
 # n8n Job Search Automation Plan
 
-**Status:** Planning only — no workflows or production automation have been implemented.
+**Status:** Local job-pipeline foundation implemented; production integrations remain unconfigured.
 
 **Purpose:** Define a self-hosted n8n system that uses the existing `career-ops` project as the candidate-knowledge and document-generation layer, while keeping application submission and outbound networking under explicit human control.
+
+## Implementation status
+
+The repository now includes a local Docker stack, review dashboard, durable local
+review/pipeline stores, direct public-ATS verification for Greenhouse, Lever, and
+Ashby, deterministic safety/fit gates, application-packet Markdown artifacts,
+and an importable n8n manual-smoke-test workflow. The worker never logs in,
+sends a message, or submits an application.
+
+| Area | Status | Remaining work |
+|---|---|---|
+| Docker stack and health checks | Implemented | Start Docker Desktop and perform a live smoke test. |
+| ATS URL selection and verification | Implemented for Greenhouse, Lever, Ashby | Add adapters only for future permitted sources. |
+| Local fit gates and review packets | Implemented | Connect canonical CV/PDF generation and optional LLM evaluation. |
+| Human review dashboard | Implemented | Optional notification adapters. |
+| n8n workflow | Importable manual smoke test | Add Notion mapping, schedule, branches, and credentials. |
+| Apify | Planned, disabled by default | Choose a permitted Actor, input schema, budget, and max-run charge. |
+| Founder research/outreach | Planned | Supply an approved/manual input source and build the public-source research flow. |
 
 **Candidate context:** Nivish Vincent Raj, India-based junior/early engineer targeting small, early-stage teams hiring for Node.js, Python/FastAPI/Django, JavaScript/TypeScript, full-stack, product, forward-deployed, and AI-native engineering work.
 
@@ -269,10 +287,17 @@ Apify can also be developed locally using its CLI/SDK, but that does not make th
 
 ### Provider order
 
-1. Apify Actor for a target that has a tested Actor.
-2. Existing public ATS APIs: Greenhouse, Ashby, Lever.
-3. Local Dockerized HTTP/Playwright scraper for permitted public pages.
+1. Existing public ATS APIs: Greenhouse, Ashby, Lever, when a supported direct job URL is available.
+2. Apify Actor for discovery from a permitted target where it materially improves coverage.
+3. Local Dockerized HTTP fetcher for permitted, stable public company pages.
 4. Manual review queue.
+
+Apify is a discovery service, not the source of truth for a known ATS posting.
+Every discovered Greenhouse, Ashby, or Lever URL should be verified again through
+the direct provider API before it can be evaluated. If Apify reaches its free-tier
+or configured spending limit, disable Apify for the period; keep direct ATS
+verification running and route unsupported sources to manual review. Do not switch
+automatically to browser automation to bypass a provider restriction.
 
 Do not use a fallback to defeat a site block. If an Apify LinkedIn Actor fails because LinkedIn blocks or restricts it, do not automatically switch to browser automation or another scraper to bypass that control. For LinkedIn use approved API access or user-provided/exported data.
 
@@ -674,39 +699,38 @@ Before a message is marked ready:
 
 ### Phase 0 — Infrastructure
 
-- Self-host n8n with persistent storage.
-- Build the career-ops worker image with Node.js and Playwright.
-- Add internal health check.
-- Configure secrets and backups.
-- Confirm `npm run doctor`, `npm run sync-check`, and `npm run verify`.
+- **Implemented:** self-hosted n8n/Postgres/worker Compose topology, persistent
+  local volumes, worker health endpoint, Compose health check, and localhost-only
+  service ports.
+- **Remaining:** configure real secrets/backups and perform the live Docker smoke
+  test. The referenced `career-ops` commands belong to the separate project and
+  are not run by this repository.
 
 ### Phase 1 — Notion job ingestion
 
-- Read only rows with a controlled status.
-- Normalize and deduplicate URLs.
-- Implement provider selector.
-- Add Apify Actor configuration behind a feature flag.
-- Add provider state/circuit breaker.
+- **Implemented locally:** URL normalization/deduplication and provider selection;
+  direct Greenhouse, Lever, and Ashby verification; a local pipeline endpoint;
+  durable local job state.
+- **Remaining:** Notion read/write property mapping, an optional Apify Actor behind
+  a feature flag, and provider-state/circuit-breaker persistence for Apify.
 
 ### Phase 2 — Extraction and evaluation
 
-- Normalize job text.
-- Add liveness/eligibility gates.
-- Call the LLM with strict JSON output.
-- Store evidence and score in Notion.
+- **Implemented locally:** normalized job text, liveness, location, seniority, and
+  stack gates; deterministic evidence-backed scores.
+- **Remaining:** optional strict-JSON LLM evaluator and Notion updates.
 
 ### Phase 3 — Documents
 
-- Call the career-ops PDF worker.
-- Store output paths or private artifact URLs.
-- Add application packet review notification.
+- **Implemented locally:** Markdown review packets stored in the artifact volume.
+- **Remaining:** call the canonical CV/PDF generator and add an optional review
+  notification adapter.
 
 ### Phase 4 — Human approval
 
-- Add n8n Wait/approval step.
-- Allow the user to approve, reject, edit, or skip.
-- Implement a channel-neutral approval contract; start with the local dashboard/n8n Form and add notification adapters later.
-- Never connect a production workflow directly to a Submit button.
+- **Implemented:** local review dashboard with approve/reject/regenerate and an
+  expiring opaque approval ID. No decision can submit an application.
+- **Remaining:** n8n Wait/Form and optional notification adapters.
 
 ### Phase 5 — Founder research
 

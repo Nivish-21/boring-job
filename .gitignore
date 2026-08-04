@@ -5,3 +5,4 @@ data/artifacts/*
 data/review/*
 !data/**/.gitkeep
 npm-debug.log*
+.firecrawl/

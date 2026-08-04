@@ -28,12 +28,17 @@ services:
     volumes:
       - ./data/artifacts:/app/artifacts
       - ./data/review:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   n8n:
     image: n8nio/n8n:stable
     restart: unless-stopped
     ports:
-      - "${N8N_PORT:-5678}:5678"
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
@@ -55,4 +60,4 @@ services:
       postgres:
         condition: service_healthy
       worker:
-        condition: service_started
+        condition: service_healthy

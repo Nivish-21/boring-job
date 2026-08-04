@@ -5,7 +5,10 @@ It is intentionally a local queue: it records review decisions but cannot submit
 an application or send a message.
 
 Set `REVIEW_AUTH_USER` and `REVIEW_AUTH_PASSWORD` in `.env` before exposing the
-dashboard anywhere beyond localhost. n8n can create a review item with:
+dashboard anywhere beyond localhost. For a local n8n workflow, use the worker
+hostname (`http://worker:8080`) rather than `localhost`, because n8n runs in its
+own container. Configure the same Basic Auth values in n8n's HTTP Request
+credential when they are enabled. n8n can create a review item with:
 
 ```http
 POST http://worker:8080/api/review/items
@@ -45,3 +48,13 @@ Each item shows:
 - approve, reject, and regenerate actions.
 
 External submission must require a second confirmation after the artifact is opened.
+
+## Local checklist
+
+1. Start Docker Desktop, then run `docker compose up -d --build` in the project
+   root.
+2. Check `curl http://localhost:8080/health`.
+3. Open the dashboard at `http://localhost:8080`.
+4. Run the documented pipeline endpoint or the n8n Manual Trigger workflow.
+5. Review the source and draft; record a decision. No decision sends or submits
+   anything externally.

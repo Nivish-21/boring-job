@@ -118,3 +118,31 @@ test('runs the pipeline endpoint only through the injected safe pipeline', async
     await close(server);
   }
 });
+
+test('runs the discovery endpoint only through the injected discovery runner', async () => {
+  const store = { list: async () => [] };
+  let runCalled = false;
+  const discoveryRunner = { run: async () => { runCalled = true; return { discovered: 3, processed: 3, stage_counts: { needs_review: 2, skipped: 1 } }; } };
+  const server = await start({ store, discoveryRunner, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const response = await call(server, { method: 'POST', path: '/api/discovery/run' });
+    assert.equal(response.status, 200);
+    assert.equal(runCalled, true);
+    assert.deepEqual(response.body.result, { discovered: 3, processed: 3, stage_counts: { needs_review: 2, skipped: 1 } });
+  } finally {
+    await close(server);
+  }
+});
+
+test('returns 503 from the discovery endpoint when no discovery runner is configured', async () => {
+  const store = { list: async () => [] };
+  const server = await start({ store, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const response = await call(server, { method: 'POST', path: '/api/discovery/run' });
+    assert.equal(response.status, 503);
+  } finally {
+    await close(server);
+  }
+});

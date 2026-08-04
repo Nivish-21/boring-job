@@ -9,6 +9,11 @@ import { selectProvider } from './provider-selector.mjs';
 import { verifyJob } from './job-verifier.mjs';
 import { PipelineStore } from './pipeline-store.mjs';
 import { JobPipeline } from './job-pipeline.mjs';
+import { ProviderStateStore } from './provider-state-store.mjs';
+import { loadResumeCatalog } from './resume-catalog.mjs';
+import { lookupCompany } from './company-lookup.mjs';
+import { classifyResumeBucket } from './fit-evaluator.mjs';
+import { discoverJobUrls, verifyDiscoveredUrl, DiscoveryRunner } from './job-discovery.mjs';
 
 const moduleDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(moduleDir, '..', 'public');
@@ -68,7 +73,7 @@ const serveStatic = async (res, pathname) => {
   }
 };
 
-export const createApp = ({ store, pipeline, artifactDir, auth }) => createServer(async (req, res) => {
+export const createApp = ({ store, pipeline, discoveryRunner, artifactDir, auth }) => createServer(async (req, res) => {
   const url = new URL(req.url, 'http://worker.local');
   if (req.method === 'GET' && url.pathname === '/health') {
     return sendJson(res, 200, { ok: true, service: 'career-ops-worker', artifactDir, review_store: 'ready' });
@@ -100,6 +105,11 @@ export const createApp = ({ store, pipeline, artifactDir, auth }) => createServe
       const result = await pipeline.process(await readJson(req));
       return sendJson(res, 200, { ok: ['needs_review', 'duplicate'].includes(result.stage), result });
     }
+    if (req.method === 'POST' && url.pathname === '/api/discovery/run') {
+      if (!discoveryRunner) return sendJson(res, 503, { ok: false, error: 'discovery runner is unavailable' });
+      const result = await discoveryRunner.run();
+      return sendJson(res, 200, { ok: true, result });
+    }
     const decisionMatch = url.pathname.match(/^\/api\/review\/items\/([^/]+)\/decision$/);
     if (req.method === 'POST' && decisionMatch) {
       const item = await store.decide(decisionMatch[1], await readJson(req));
@@ -116,10 +126,19 @@ export const createApp = ({ store, pipeline, artifactDir, auth }) => createServe
   }
 });
 
+const DEFAULT_DISCOVERY_QUERY = 'remote backend software engineer job posting India eligible';
+
 export const startWorker = async ({
   port = Number(process.env.PORT || 8080),
   artifactDir = process.env.ARTIFACT_DIR || '/app/artifacts',
   reviewDataDir = process.env.REVIEW_DATA_DIR || '/app/data',
+  resumeDir = process.env.RESUME_DIR || '/app/resumes',
+  discoveryQuery = process.env.DISCOVERY_QUERY || DEFAULT_DISCOVERY_QUERY,
+  dailyCap = Number(process.env.DAILY_LEAD_CAP || 20),
+  apifyActorId = process.env.APIFY_ACTOR_ID || undefined,
+  openaiApiKey = process.env.OPENAI_API_KEY || '',
+  firecrawlApiKey = process.env.FIRECRAWL_API_KEY || '',
+  apifyApiToken = process.env.APIFY_API_TOKEN || '',
   auth = { user: process.env.REVIEW_AUTH_USER || '', password: process.env.REVIEW_AUTH_PASSWORD || '' }
 } = {}) => {
   if ((auth.user && !auth.password) || (!auth.user && auth.password)) {
@@ -130,8 +149,38 @@ export const startWorker = async ({
   await store.initialize();
   const pipelineStore = new PipelineStore(join(reviewDataDir, 'pipeline-jobs.json'));
   await pipelineStore.initialize();
-  const pipeline = new JobPipeline({ store: pipelineStore, reviewStore: store, artifactDir });
-  const server = createApp({ store, pipeline, artifactDir, auth });
+  const providerState = new ProviderStateStore(join(reviewDataDir, 'provider-state.json'));
+  await providerState.initialize();
+
+  let resumeBuckets = [];
+  try {
+    resumeBuckets = await loadResumeCatalog(resumeDir);
+  } catch (error) {
+    console.warn(`Resume catalog unavailable at ${resumeDir} (${error.message}); continuing with no resume matching.`);
+  }
+
+  const verifyFallback = (sourceUrl) => verifyDiscoveredUrl(sourceUrl, { firecrawlApiKey, apifyApiToken, apifyActorId, providerState });
+  const resumeClassifier = (job, buckets) => classifyResumeBucket(job, buckets, { apiKey: openaiApiKey });
+  const companyLookup = (name) => lookupCompany(name, { apiKey: firecrawlApiKey });
+
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore: store,
+    artifactDir,
+    verifyFallback,
+    resumeClassifier,
+    resumeBuckets,
+    companyLookup,
+    dailyCap
+  });
+  const discoveryRunner = new DiscoveryRunner({
+    pipeline,
+    discoverUrls: discoverJobUrls,
+    query: discoveryQuery,
+    apiKey: firecrawlApiKey,
+    limit: dailyCap * 2
+  });
+  const server = createApp({ store, pipeline, discoveryRunner, artifactDir, auth });
 
   server.listen(port, '0.0.0.0', () => {
     console.log(`career-ops-worker listening on ${port}`);

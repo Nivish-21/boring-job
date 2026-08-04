@@ -43,3 +43,121 @@ test('runs a verified job to a durable review item and deduplicates retries', as
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('retries an unverified job through verifyFallback and continues normally on success', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => ({ liveness: 'unverified', verification_status: 'manual_review', source_url: 'https://careers.acme.com/jobs/backend' }),
+    verifyFallback: async () => verifiedJob
+  });
+
+  try {
+    const result = await pipeline.process({ source_url: 'https://careers.acme.com/jobs/backend' });
+    assert.equal(result.stage, 'needs_review');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('does not call verifyFallback when the primary verification already succeeded', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  let fallbackCalled = false;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob,
+    verifyFallback: async () => { fallbackCalled = true; return verifiedJob; }
+  });
+
+  try {
+    await pipeline.process({ source_url: verifiedJob.source_url });
+    assert.equal(fallbackCalled, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('stops at the daily cap before spending resumeClassifier/companyLookup calls', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  let resumeClassifierCalled = false;
+  let companyLookupCalled = false;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob,
+    dailyCap: 0,
+    resumeClassifier: async () => { resumeClassifierCalled = true; return { bucket_id: null }; },
+    companyLookup: async () => { companyLookupCalled = true; return { website_url: null, linkedin_url: null }; }
+  });
+
+  try {
+    const result = await pipeline.process({ source_url: verifiedJob.source_url });
+    assert.equal(result.stage, 'daily_cap_reached');
+    assert.equal(resumeClassifierCalled, false);
+    assert.equal(companyLookupCalled, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('adds Suggested resume and Company links sections when a resumeClassifier and companyLookup are configured', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const buckets = [{ id: '01', target_role: 'Backend Software Engineer', pdf_path: '/app/resumes/01-Backend.pdf', positioning_angle: 'Node + Python depth' }];
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob,
+    resumeBuckets: buckets,
+    resumeClassifier: async () => ({ bucket_id: '01', confidence: 0.9, reason: 'Strong match' }),
+    companyLookup: async () => ({ website_url: 'https://acme.com', linkedin_url: 'https://www.linkedin.com/company/acme' })
+  });
+
+  try {
+    const result = await pipeline.process({ source_url: verifiedJob.source_url });
+    const artifact = await readFile(result.artifact_path, 'utf8');
+    assert.match(artifact, /## Suggested resume/);
+    assert.match(artifact, /01-Backend\.pdf/);
+    assert.match(artifact, /## Company links/);
+    assert.match(artifact, /https:\/\/acme\.com/);
+    assert.match(artifact, /linkedin\.com\/company\/acme/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('companyName falls back to a hostname-derived guess for discovered (non-ATS) postings', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const discoveredJob = {
+    liveness: 'live', provider: 'manual', source_url: 'https://careers.stripe.com/jobs/backend',
+    job: { stable_id: 'manual:https://careers.stripe.com/jobs/backend', title: 'Backend Engineer', source_url: 'https://careers.stripe.com/jobs/backend', location: 'Remote — India', description_text: 'Build Node.js and TypeScript APIs with Docker and PostgreSQL.' }
+  };
+  const pipeline = new JobPipeline({ store: pipelineStore, reviewStore, artifactDir: join(root, 'artifacts'), verify: async () => discoveredJob });
+
+  try {
+    const result = await pipeline.process({ source_url: discoveredJob.source_url });
+    assert.equal(result.review.title, 'Backend Engineer — stripe');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

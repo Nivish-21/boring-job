@@ -17,6 +17,10 @@ export class PipelineStore {
     const state = await this.#read();
     return state.jobs.find((job) => job.stable_id === stableId) || null;
   }
+  async countCreatedSince(isoString) {
+    const state = await this.#read();
+    return state.jobs.filter((job) => job.status === 'needs_review' && job.created_at >= isoString).length;
+  }
   async record(record) {
     return this.#mutate((state) => {
       const existing = state.jobs.find((job) => job.stable_id === record.stable_id);
