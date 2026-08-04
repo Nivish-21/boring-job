@@ -16,16 +16,22 @@ extracted text (kept outside git, in `~/Desktop/Nivish_Tailored_Resumes/referenc
 `OPENAI_API_KEY` still not supplied — resume classification degrades to `null` as designed,
 everything else works. 85/85 tests passing; `docker compose config --quiet` validates clean.
 
-## Active plan — PAUSED MID-BUILD, resume here next session
+## Active plan — MID-BUILD, resume here next session (context-budget checkpoint, not a user pause)
 
-Building the **founder-outreach feature** (docs/plan.md, last task block). User approved
-starting it ("can you build a code for this?"), confirmed no postgres/n8n needed (reuses the
-single-service worker architecture as-is), then asked to pause and log everything before going
-out. **No code was written yet** — only re-read `pipeline-store.mjs`, `company-lookup.mjs`, and
-`fit-evaluator.mjs` as patterns to mirror. The full build design (files, store shape, route,
-dashboard gap to close, IST timestamp handling) is written out in `docs/plan.md` under "New task
-block: founder outreach from LinkedIn connections" — read that block first, it has everything
-needed to start coding immediately without re-deriving the architecture.
+Building the **founder-outreach feature** (docs/plan.md, last task block, "Resume point (2026-08-04,
+third pass)"). 3 of 7 steps done and written to disk, untested: `worker/src/connections-catalog.mjs`,
+`worker/src/founder-store.mjs`, `worker/src/founder-outreach.mjs`. Read the "Resume point" note in
+docs/plan.md — it documents a few implementation deviations from the original sketch (single
+combined LLM call for company-summary+draft instead of two, ATS-priority URL sort, review item
+always created even when drafting fails) that still need logging to docs/decisions.md.
+
+**Not started yet, in order:** wire `FounderStore`/`FounderOutreachRunner` into `server.mjs` +
+new `POST /api/founders/import` route (raw CSV body, not JSON — server.mjs's `readJson` is
+JSON-only today, this route needs its own raw-body reader); close the dashboard gap in
+`worker/public/app.js` (`kind: 'founder'` review items have no pipeline-job counterpart, so
+`buildCards()` never surfaces them today); tests for all three new modules + the new route;
+`docs/decisions.md`/`changelog.md`/`status.md` once tested end-to-end. Full detail, including
+exact function signatures already built, is in `docs/plan.md` — do not re-derive.
 
 **Explicit instruction for next session: do not open by asking for the LinkedIn connections
 CSV.** The user was clear about this. Resume building from the design in `docs/plan.md`; the

@@ -486,3 +486,71 @@ until the code actually needs it to run end-to-end.
 - IST timestamps: format founder-outreach card timestamps with
   `Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', ... })` explicitly (not
   `undefined`/browser-local like the job cards), since the user asked for IST specifically here.
+
+**Resume point (2026-08-04, third pass — mid-build, stopped at a context-budget boundary, not a
+pause request).** 3 of 7 build steps done. Built and NOT yet tested:
+
+- [x] `worker/src/connections-catalog.mjs` — `parseConnectionsCsv` (scans for the `First
+      Name,Last Name` header line, hand-rolled quoted-CSV-cell splitter), `isFounderTitle`
+      (regex: founder/co-founder/founding/ceo/chief executive), `filterFounders`.
+- [x] `worker/src/founder-store.mjs` — `FounderStore`, atomic-JSON-file pattern copied from
+      `pipeline-store.mjs`, keyed by `profile_url` (`getByProfileUrl`/`list`/`record`).
+- [x] `worker/src/founder-outreach.mjs` — built, deviates from the original sketch in a few
+      places (flagged here for `docs/decisions.md`, not yet logged there):
+      - `findCareersUrl(companyName, websiteUrl, {apiKey, limit, fetchImpl})`: two Firecrawl
+        searches (ATS-site-scoped + company-hostname-scoped if `websiteUrl` known), results
+        deduped and sorted so ATS-board URLs (verify for free) come before generic ones. Each
+        search independently caught, same resilience pattern as `company-lookup.mjs`.
+      - Company summarization is NOT a separate LLM step — a single Firecrawl scrape of the
+        company website (capped 2,000 chars, degrades to `null` on any failure) is fed as raw
+        context directly into the one `draftOutreachMessage` OpenAI call, which both
+        summarizes and drafts in one prompt. Chose one LLM call over two to keep the shape
+        identical to `fit-evaluator.mjs`'s single-call pattern and to not double OpenAI cost
+        per founder.
+      - `draftOutreachMessage({founder, companyContext, matchedJob, resumeBucket},
+        {apiKey, fetchImpl, model})` — OpenAI call shaped exactly like `classifyResumeBucket`,
+        degrades to `{message: null, reason}` on any failure, never throws.
+      - `FounderOutreachRunner`: `run(founders)` loops an already-filtered founder array (CSV
+        parsing/filtering happens in the route handler, not here), skips non-http
+        `profile_url`s (boundary validation), skips founders already in `founderStore`, caps at
+        `cap` (default 20, mirrors `dailyCap`) new founders per call. Per founder: looks up
+        company → `findCareersUrl` → up to 3 candidate URLs through the **unmodified**
+        `pipeline.process()`, stops at the first `needs_review` hit → if matched, classifies
+        the resume bucket against that job via the injected `resumeClassifier` → drafts the
+        message → **always** creates a `ReviewStore` item (`kind: 'founder'`), even when
+        drafting failed (`draft: null`, reason folded into `summary`) — human review is
+        pointless to hide, matches the project's "persist every outcome" rule. Marks the
+        founder processed in `founderStore` regardless of outcome.
+      - Constructor takes `firecrawlApiKey` AND `openaiApiKey` explicitly (not read from
+        `process.env` inside the module) — matches this project's "no implicit/magic values
+        inside a module, wire keys in from `startWorker()`" pattern used everywhere else.
+
+**Not started yet (in order):**
+- [ ] `worker/src/server.mjs`: construct `FounderStore`, wire a `FounderOutreachRunner` in
+      `startWorker()` (needs `openaiApiKey` passed through, which no other runner currently
+      takes directly — check whether `classifyResumeBucket`'s existing `openaiApiKey` var can
+      just be reused). New route `POST /api/founders/import` — raw CSV body
+      (`content-type: text/csv`, NOT JSON — note `readJson`/`maxBodyBytes` in `server.mjs` is
+      JSON-only today, so this route needs its own raw-body reader, capped the same way).
+      Route: parse via `parseConnectionsCsv` → `filterFounders` → `founderOutreachRunner.run()`
+      → return `{ok, result}`. Auth-gated like every other route (already automatic — only
+      `/health` is excluded from `isAuthorized`).
+- [ ] `worker/public/app.js` dashboard gap: `buildCards()` only iterates `pipelineJobs` and
+      looks up a review item via `job.review_item_id`. A `kind: 'founder'` review item has NO
+      pipeline-job counterpart, so add a second pass appending any review item not already
+      referenced by a pipeline job's `review_item_id` as its own card. Add a Founder/Job badge.
+      IST-format founder card timestamps specifically (`Intl.DateTimeFormat('en-IN', {timeZone:
+      'Asia/Kolkata', ...})`), leave job cards on browser-local as-is.
+- [ ] Tests: `connections-catalog.test.mjs`, `founder-store.test.mjs`,
+      `founder-outreach.test.mjs` (mock `fetchImpl`/injected collaborators, same pattern as
+      `company-lookup.test.mjs`/`fit-evaluator.test.mjs`/`job-discovery.test.mjs`), plus a
+      `server.test.mjs` case for the new route. Run full `npm test` in `worker/`, confirm no
+      regressions against the current 85 passing.
+- [ ] `docs/decisions.md`: log the deviations above (single-LLM-call company summary+draft;
+      ATS-priority URL sort in `findCareersUrl`; always-create-review-item-even-on-draft-
+      failure). `docs/changelog.md` + `docs/status.md`: update once the full feature is tested
+      end-to-end (not yet — do not mark done prematurely).
+
+**Do not re-derive the design above — read it, then continue directly from `server.mjs` wiring.**
+No new architectural decisions needed; this is mechanical continuation of an already-approved,
+already-substantially-built feature.
