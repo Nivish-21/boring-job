@@ -6,3 +6,4 @@ data/review/*
 !data/**/.gitkeep
 npm-debug.log*
 .firecrawl/
+worker/founder-outreach/

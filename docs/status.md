@@ -13,42 +13,48 @@ each card showing an explicit "Discovered" timestamp and colour-coded fit score)
 job ever seen, plus a Firecrawl/Apify usage strip. Discovery targets ATS-hosted boards directly
 (Greenhouse/Lever/Ashby). Packet drafts include a capped excerpt of the matched resume's real
 extracted text (kept outside git, in `~/Desktop/Nivish_Tailored_Resumes/reference/`).
-A **founder-outreach feature** is now built and unit-tested on top of this: imports a LinkedIn
-connections CSV (official export, no scraping), identifies founders, researches their companies,
-checks for a real open role through the unmodified job pipeline, and drafts a personalized
-outreach message for human review — never auto-sends. Not yet run against real data (see "Active
-plan" below). `OPENAI_API_KEY` still not supplied — resume classification and founder-outreach
-message drafting both degrade to `null`/no-draft as designed, everything else works. 109/109
-tests passing; `docker compose config --quiet` validates clean.
+A **founder-outreach feature** is now built, unit-tested, and **live-verified against real
+data**: imports a LinkedIn connections CSV (official export, no scraping), identifies founders,
+researches their companies, checks for a real open role through the unmodified job pipeline, and
+drafts a personalized outreach message for human review — never auto-sends. First real batch (3
+founders, capped) ran successfully against the user's actual 576-connection export; see "Active
+plan" below for results and an outstanding key-rotation item. `OPENAI_API_KEY` is now supplied.
+109/109 tests passing; `docker compose config --quiet` validates clean.
 
-## Active plan — founder-outreach feature: built and unit-tested, not yet run against real data
+## Active plan — founder-outreach feature: LIVE-VERIFIED against real data (2026-08-04)
 
-All 7 build steps in `docs/plan.md` are complete: `connections-catalog.mjs` (CSV parsing),
-`founder-store.mjs`, `founder-outreach.mjs` (careers-URL discovery + OpenAI drafting, reusing the
-unmodified `JobPipeline`), `server.mjs` wiring (`POST /api/founders/import`), the dashboard gap
-close (`kind: 'founder'` review items now render with a Job/Founder badge and IST timestamps),
-and a full test suite (24 new tests). **109/109 tests passing project-wide.** Implementation
-deviations from the original design sketch are logged in `docs/decisions.md`
-("Founder-outreach implementation deviations").
+First real run complete: imported the user's actual LinkedIn `Connections.csv` (576 connections,
+176 flagged as founders) via `POST /api/founders/import` against the worker running locally with
+real `FIRECRAWL_API_KEY`/`APIFY_API_TOKEN`/`OPENAI_API_KEY` and pointed at the real
+`data/review/`/`data/artifacts/` dirs (not a throwaway test dir). Capped at 3 for this first
+batch (`DAILY_LEAD_CAP=3` in `.env`). All 3 processed successfully, all 3 got a real OpenAI-
+drafted message, confirmed rendering correctly in the real dashboard (badge, IST timestamp,
+draft, evidence, Firecrawl/Apify usage strip all showing real numbers). Remaining 173 flagged
+founders are untouched — re-running the import will pick up the next batch (already-processed
+founders are skipped via `founderStore`).
 
-**What's actually left is a live run, not more building:**
-1. User exports LinkedIn connections via Settings & Privacy → "Get a copy of your data" →
-   Connections (a CSV — no scraping, no credentials shared, matches the ToS-safety decision
-   already made for this feature).
-2. `POST /api/founders/import` with that CSV as the raw body (`content-type: text/csv`) against
-   a running worker.
-3. Confirm in the dashboard: founders get identified, company research happens, any real open
-   role gets found through the normal job pipeline, and a message gets drafted (or, if
-   `OPENAI_API_KEY` still isn't supplied, confirm the review item still appears with `draft: null`
-   and a clear reason — this is the designed degrade path, not a bug).
+**Real-data observations, not bugs:** 2 of 3 founders' companies had no discoverable website/
+LinkedIn/open role (small/early startups with thin web presence) — those drafts are generic
+value-add messages. One draft included a literal `[your area of expertise]` placeholder where
+the LLM had no resume/company context to fill in — a real quality signal that draft quality
+depends on how much Firecrawl actually finds, worth knowing before approving anything, not
+something to "fix" in code.
 
-**Explicit instruction for next session: do not open by asking for the LinkedIn connections
-CSV unprompted.** It's fine to ask now that the code is actually ready to run against it — this
-instruction was about not asking before the code existed, which is no longer the case.
+**Security incident during this run (logged in full in `~/.claude/lessons.md` and
+`docs/lessons.md`):** a `grep` on `.env` intended to just confirm which vars were set instead
+printed real secret values into the conversation — `OPENAI_API_KEY`, `APIFY_API_TOKEN`,
+`FIRECRAWL_API_KEY` (live), plus `N8N_ENCRYPTION_KEY`/`POSTGRES_PASSWORD` (decommissioned
+services). User chose to proceed with the test import rather than rotate first. **Still
+outstanding: rotate `FIRECRAWL_API_KEY`, `APIFY_API_TOKEN`, and `OPENAI_API_KEY`** — regenerate
+in each provider's dashboard, update `.env`, no code changes needed.
+
+**Real `Connections.csv` lives at `worker/founder-outreach/import.zip/Connections.csv`**
+(git-ignored — the folder holds the user's full LinkedIn data-archive export, real PII, never
+committed). Re-running `POST /api/founders/import` against that same file picks up the next
+batch of the remaining 173 flagged founders automatically (already-processed ones are skipped).
 
 `DISCOVERY_SCHEDULE_ENABLED` is still off by default for the existing job-discovery pipeline —
-turn on when the user wants real unattended daily runs. `OPENAI_API_KEY` is still not supplied
-(optional — resume-bucket auto-suggestion and founder-outreach message drafting both need it).
+turn on when the user wants real unattended daily runs.
 
 ## Major decisions
 
@@ -120,16 +126,17 @@ See `docs/decisions.md` for full reasoning. Summary:
   dashboard edit needs an image rebuild to take effect.
 - Company-profile lookup running on every live-verified job roughly doubles Firecrawl search
   volume for that step — cheap per call, worth watching via the usage strip.
-- Founder-outreach has never been run against real data — only unit-tested with injected fakes
-  and a live dashboard smoke test against seeded local JSON. First real CSV import may surface
-  behaviour the unit tests didn't anticipate (see "Active plan" above for the exact next steps).
+- `FIRECRAWL_API_KEY`, `APIFY_API_TOKEN`, and `OPENAI_API_KEY` were printed in full into a
+  conversation transcript on 2026-08-04 (see "Active plan" above) — **not yet rotated**.
 
 ## Next steps
 
-1. **Run founder-outreach against real data** — user exports their LinkedIn connections CSV,
-   imports it via `POST /api/founders/import`, confirm the dashboard shows what's expected. See
-   "Active plan" above for the exact checklist.
-2. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
+1. **Rotate `FIRECRAWL_API_KEY`, `APIFY_API_TOKEN`, and `OPENAI_API_KEY`** — exposed in a
+   conversation transcript on 2026-08-04, user chose to defer rotation to finish the test import
+   first. Regenerate in each provider's dashboard, update `.env`.
+2. Review the 3 drafted founder-outreach messages in the dashboard (approve/reject/regenerate).
+   Re-run `POST /api/founders/import` with the same `Connections.csv` to process the next batch
+   of the remaining 173 flagged founders whenever ready — raise `DAILY_LEAD_CAP` in `.env` first
+   if a bigger batch is wanted.
+3. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
    the user wants that (currently off; manual trigger via `POST /api/discovery/run` still works).
-3. User supplies `OPENAI_API_KEY` when ready (optional — powers resume-bucket auto-suggestion
-   and founder-outreach message drafting).
