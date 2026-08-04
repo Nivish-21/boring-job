@@ -1,5 +1,12 @@
 # n8n Job Search Automation Plan
 
+> **2026-08-04 update:** n8n and Postgres were removed from the running stack. n8n's only
+> actual role had become firing one daily HTTP call — all discovery/verification/fit-scoring/
+> resume-matching logic lives in the worker as tested code, so n8n added nothing here, and
+> Postgres existed solely as n8n's own database. Replaced with a small in-worker scheduler
+> (`worker/src/scheduler.mjs`). See `docs/decisions.md` for the full reasoning. The rest of this
+> document is kept as the original design record and is otherwise unchanged.
+
 **Status:** Local job-pipeline foundation implemented; production integrations remain unconfigured.
 
 **Purpose:** Define a self-hosted n8n system that uses the existing `career-ops` project as the candidate-knowledge and document-generation layer, while keeping application submission and outbound networking under explicit human control.

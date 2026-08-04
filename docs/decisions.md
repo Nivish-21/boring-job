@@ -267,3 +267,27 @@ git history permanently (only removable by rewriting history) on a repo actively
 Flagged this to the user before building anything; they approved the `reference/` approach as
 proposed. Functionally identical outcome (the LLM gets real resume text as context) with zero
 PII ever touching git.
+
+## 2026-08-04 — Dropped n8n + Postgres, replaced with an in-worker scheduler
+
+**Context:** After importing the daily-discovery workflow into n8n by hand, the user noticed its
+only actual job was firing one HTTP call once a day — every other piece of logic (search,
+dedup, verification, fit-scoring, resume-matching) already lives in tested worker code. Postgres
+existed solely as n8n's own backing database (`DB_TYPE: postgresdb` — nothing in the worker
+touches Postgres directly). Two extra Docker services for a cron tick.
+
+**Decision:** Removed both services from `compose.yml` and replaced the trigger with
+`worker/src/scheduler.mjs` — a ~20-line polling scheduler with zero new dependencies, gated off
+by default via `DISCOVERY_SCHEDULE_ENABLED` (mirroring the old workflow's `active: false`
+default). Deleted the `workflows/` directory; updated `README.md`'s setup instructions
+accordingly; left `PLAN.md` (the original design doc) as an append-only historical record with a
+dated note pointing here.
+
+**Reasoning:** n8n's genuine strength is stitching together external integrations (Slack, email,
+Notion, calendars) with branching/retry semantics — not reimplementing business logic that's
+inherently code-shaped and already exists as unit-tested JS. Using it here just to hold a cron
+trigger was disproportionate infrastructure for what it did. If a genuinely n8n-shaped need shows
+up later (e.g. notifying on new `needs_review` items across multiple channels), reintroducing it
+then would be earning its keep rather than serving as a wrapper around code that already runs
+itself. `data/n8n` and `data/postgres` were left on disk (not deleted) at the user's explicit
+choice, so this remains reversible without redoing the n8n owner-account setup.

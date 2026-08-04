@@ -350,6 +350,41 @@ actively being pushed. Proposed alternative below keeps the same benefit without
       confirmed `loadResumeCatalog()` actually attaches real extracted text at runtime.
 - [x] `docs/decisions.md` — logged.
 
+## New task block: drop n8n + postgres, replace with an in-worker scheduler (2026-08-04)
+
+**Goal:** User pointed out (correctly) that n8n's only role in this project had become firing
+one daily HTTP call — every other piece of logic already lives in tested worker code — and
+asked why that needed n8n (plus Postgres, which existed solely as n8n's database) at all.
+
+**Approved:** drop n8n + Postgres entirely; replace the daily trigger with a small in-worker
+scheduler, zero new dependencies.
+
+**Steps:**
+- [x] `worker/src/scheduler.mjs` — `startDailyScheduler({ run, hourUtc, checkIntervalMs, now,
+      scheduleImpl, log })`: polls every 15 min (default), fires `run()` once per UTC calendar
+      day during `hourUtc`. In-memory-only `lastRunDate` (documented simplification — a restart
+      mid-window could re-trigger once, tolerated by the pipeline's own dedup).
+- [x] `worker/src/server.mjs` — wired in via `DISCOVERY_SCHEDULE_ENABLED` (default **off**,
+      matching the old n8n workflow's `active: false` default) and `DISCOVERY_HOUR_UTC`
+      (default 7).
+- [x] `compose.yml` — removed the `postgres` and `n8n` services entirely; `worker` is now the
+      only service. Validated with `docker compose config --quiet`.
+- [x] `.env.example` — removed `N8N_*`/`POSTGRES_*`, added `DISCOVERY_SCHEDULE_ENABLED`/
+      `DISCOVERY_HOUR_UTC`.
+- [x] Removed `workflows/` (both workflow JSON files + its README) from git and disk — no
+      longer applicable.
+- [x] `README.md` — rewrote the sections that instructed opening n8n/generating its secrets;
+      replaced with the manual-trigger curl command and the new scheduler env vars.
+- [x] `PLAN.md` — left as the original design record (append-only), added a short dated note at
+      the top pointing to this decision instead of rewriting its content.
+- [x] Tests: `scheduler.test.mjs` (5 new — fires once per UTC hour/day, skips outside the
+      target hour, tolerates a failing run, `stop()` clears the timer). 85/85 passing
+      project-wide.
+- [x] Stopped and removed the `boring-job-n8n-1`/`boring-job-postgres-1` containers. Left
+      `data/n8n`/`data/postgres` on disk at the user's explicit choice, in case n8n gets
+      revisited later for something it's actually suited to (see decisions.md).
+- [x] `docs/decisions.md` — logged.
+
 ## Out of scope (this block)
 
 - Founder/personal contact discovery, LinkedIn profile scraping, or outreach

@@ -4,24 +4,25 @@ _Last updated: 2026-08-04_
 
 ## Current state
 
-The automated daily job discovery pipeline is built, live-tested, and the review dashboard now
-shows one unified, filterable list (sidebar: status checkboxes, company search, fit-score
-range) covering every job the pipeline has ever seen, plus a Firecrawl/Apify usage strip.
-Discovery targets ATS-hosted boards directly (Greenhouse/Lever/Ashby) instead of a generic web
-search, after auditing found every prior discovered URL was a job-board hub page, not an
-individual posting — root-caused and fixed, verified live (see `docs/decisions.md`).
+The automated daily job discovery pipeline is built, live-tested, and is now a **single Docker
+service** — `worker` only. n8n and Postgres were removed (n8n's only role had become firing one
+daily HTTP call; Postgres existed solely as n8n's database) and replaced with a small in-worker
+scheduler (`DISCOVERY_SCHEDULE_ENABLED`, off by default). The review dashboard is dark-themed,
+shows one unified filterable list (sidebar: status checkboxes, company search, fit-score range,
+each card showing an explicit "Discovered" timestamp and colour-coded fit score) covering every
+job ever seen, plus a Firecrawl/Apify usage strip. Discovery targets ATS-hosted boards directly
+(Greenhouse/Lever/Ashby). Packet drafts now include a capped excerpt of the matched resume's
+real extracted text (kept outside git, in `~/Desktop/Nivish_Tailored_Resumes/reference/`).
 `OPENAI_API_KEY` still not supplied — resume classification degrades to `null` as designed,
-everything else works. 78/78 tests passing; `docker compose config --quiet` validates clean.
+everything else works. 85/85 tests passing; `docker compose config --quiet` validates clean.
 
 ## Active plan
 
-Dashboard redesign is done, verified live, and pushed. Resume reference-text task is also done:
-each of the 8 resumes extracted to text outside the git repo
-(`~/Desktop/Nivish_Tailored_Resumes/reference/`) and wired into packet-draft generation as
-capped reference context — approved after flagging the PII/git-history tradeoff (see
-`docs/decisions.md`). Next: wire up `workflows/scheduled-job-discovery.json` in n8n for real
-unattended daily runs (user's stated next step). `OPENAI_API_KEY` from the user when ready
-(optional, resume-bucket auto-suggestion only).
+No open task blocks — dashboard redesign, resume reference text, dashboard dark-theme/fit-colour
+follow-ups, and the n8n/Postgres removal are all done, verified live, and pushed. Next up when
+the user wants it: turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily runs (currently
+off — manual trigger via `POST /api/discovery/run` still works), and `OPENAI_API_KEY` from the
+user when ready (optional, resume-bucket auto-suggestion only).
 
 ## Major decisions
 

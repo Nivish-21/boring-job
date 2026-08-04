@@ -253,3 +253,33 @@ light-themed) dashboard.
 **Tests:** no backend change; 80/80 still passing. Verified live in-browser: dark palette
 renders correctly, low fit scores (2/10, 4/10) render in red, Discovered row present on every
 card.
+
+## 2026-08-04 — Dropped n8n + Postgres for an in-worker scheduler
+
+n8n's only role had become firing one daily HTTP call; removed it and its database along with it
+(see `docs/decisions.md`).
+
+**Added:**
+- `worker/src/scheduler.mjs` — `startDailyScheduler`, polls every 15 min, fires once per UTC
+  calendar day during a configurable hour. Zero new dependencies.
+- `worker/test/scheduler.test.mjs` (5 tests).
+
+**Changed:**
+- `worker/src/server.mjs` — wires the scheduler into `startWorker()` via
+  `DISCOVERY_SCHEDULE_ENABLED` (default off) / `DISCOVERY_HOUR_UTC` (default 7).
+- `compose.yml` — removed the `postgres` and `n8n` services; `worker` is now the only service.
+- `.env.example` — removed `N8N_*`/`POSTGRES_*`, added the two new schedule env vars.
+- `README.md` — replaced the n8n setup/import instructions with the manual-trigger curl command
+  and the new scheduler env vars.
+- `PLAN.md` — added a dated note at the top pointing to this change; left the rest as the
+  original design record.
+
+**Removed:**
+- `workflows/` directory (both workflow JSON files and its README) — no longer applicable.
+
+**Tests:** 85/85 passing project-wide. `docker compose config --quiet` validates clean with the
+single remaining service.
+
+**Also done:** stopped and removed the `boring-job-n8n-1`/`boring-job-postgres-1` containers.
+Left `data/n8n`/`data/postgres` on disk per the user's choice (reversible later without redoing
+n8n's owner-account setup).

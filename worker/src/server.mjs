@@ -15,6 +15,7 @@ import { lookupCompany } from './company-lookup.mjs';
 import { classifyResumeBucket } from './fit-evaluator.mjs';
 import { discoverJobUrls, verifyDiscoveredUrl, DiscoveryRunner } from './job-discovery.mjs';
 import { getFirecrawlUsage, getApifyUsage } from './usage-tracker.mjs';
+import { startDailyScheduler } from './scheduler.mjs';
 
 const moduleDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(moduleDir, '..', 'public');
@@ -157,6 +158,8 @@ export const startWorker = async ({
   openaiApiKey = process.env.OPENAI_API_KEY || '',
   firecrawlApiKey = process.env.FIRECRAWL_API_KEY || '',
   apifyApiToken = process.env.APIFY_API_TOKEN || '',
+  scheduleEnabled = process.env.DISCOVERY_SCHEDULE_ENABLED === 'true',
+  scheduleHourUtc = Number(process.env.DISCOVERY_HOUR_UTC || 7),
   auth = { user: process.env.REVIEW_AUTH_USER || '', password: process.env.REVIEW_AUTH_PASSWORD || '' }
 } = {}) => {
   if ((auth.user && !auth.password) || (!auth.user && auth.password)) {
@@ -203,6 +206,12 @@ export const startWorker = async ({
   server.listen(port, '0.0.0.0', () => {
     console.log(`career-ops-worker listening on ${port}`);
     if (!auth.user && !auth.password) console.warn('Review authentication is disabled; keep the review dashboard bound to localhost.');
+    if (scheduleEnabled) {
+      startDailyScheduler({ run: () => discoveryRunner.run(), hourUtc: scheduleHourUtc });
+      console.log(`Daily discovery scheduler enabled, targeting ~${scheduleHourUtc}:00 UTC.`);
+    } else {
+      console.log('Daily discovery scheduler disabled (DISCOVERY_SCHEDULE_ENABLED=true to turn it on). Trigger manually via POST /api/discovery/run.');
+    }
   });
   return server;
 };
