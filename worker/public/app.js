@@ -1,12 +1,28 @@
-const queue = document.querySelector('#queue');
 const listings = document.querySelector('#listings');
 const usage = document.querySelector('#usage');
 const template = document.querySelector('#item-template');
-const listingTemplate = document.querySelector('#listing-template');
 const refreshButton = document.querySelector('#refresh');
+const resultCount = document.querySelector('#result-count');
+const clearFiltersButton = document.querySelector('#clear-filters');
+const filterCompany = document.querySelector('#filter-company');
+const filterFitMin = document.querySelector('#filter-fit-min');
+const statusCheckboxes = [...document.querySelectorAll('input[name="status"]')];
 
 const formatDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 const formatResetDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
+
+const STATUS_LABELS = {
+  pending: 'Pending review',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  skipped: 'Skipped (not a fit)',
+  daily_cap_reached: 'Waiting for cap',
+  unverified: "Couldn't verify",
+  expired: 'Expired / closed',
+  aggregator_rejected: 'Rejected (bad source)'
+};
+
+let allCards = [];
 
 const showMessage = (container, message, type = 'info') => {
   container.replaceChildren();
@@ -16,35 +32,103 @@ const showMessage = (container, message, type = 'info') => {
   container.append(panel);
 };
 
-const decide = async (item, action, button) => {
+// A pipeline job that reached human review shares its `id` with a review-store item
+// (`job.review_item_id`). That review item is the source of truth for status/draft/evidence
+// once a decision is made — `job-pipeline.mjs` never updates the pipeline record afterward. All
+// other pipeline jobs (skipped/expired/unverified/daily_cap_reached/rejected) have no review
+// item and are rendered read-only. `PipelineStore`'s own `'rejected'` status (aggregator
+// domain, rejected before verification) is remapped to `aggregator_rejected` so it doesn't
+// collide with `ReviewStore`'s human-decision `'rejected'` status.
+const buildCards = (pipelineJobs, reviewItems) => {
+  const reviewById = new Map(reviewItems.map((item) => [item.id, item]));
+  return pipelineJobs.map((job) => {
+    const reviewItem = job.review_item_id ? reviewById.get(job.review_item_id) : null;
+    if (reviewItem) {
+      return {
+        key: job.stable_id,
+        status: reviewItem.status,
+        title: reviewItem.title,
+        company: job.company,
+        location: job.location,
+        source_url: reviewItem.source_url,
+        summary: reviewItem.summary,
+        fit_score: reviewItem.fit_score,
+        created_at: reviewItem.created_at,
+        expires_at: reviewItem.expires_at,
+        draft: reviewItem.draft,
+        evidence: reviewItem.evidence,
+        artifact_url: reviewItem.artifact_url,
+        company_links: job.company_links,
+        reviewItem
+      };
+    }
+    return {
+      key: job.stable_id,
+      status: job.status === 'rejected' ? 'aggregator_rejected' : job.status,
+      title: job.title || job.source_url,
+      company: job.company,
+      location: job.location,
+      source_url: job.source_url,
+      summary: job.evaluation?.reason || job.error || 'No further detail recorded.',
+      fit_score: job.evaluation?.fit_score ?? null,
+      created_at: job.created_at,
+      updated_at: job.updated_at,
+      draft: null,
+      evidence: [],
+      artifact_url: null,
+      company_links: job.company_links,
+      reviewItem: null
+    };
+  });
+};
+
+const applyFilters = (cards) => {
+  const checkedStatuses = statusCheckboxes.filter((box) => box.checked).map((box) => box.value);
+  const company = filterCompany.value.trim().toLowerCase();
+  const fitMin = filterFitMin.value === '' ? null : Number(filterFitMin.value);
+  return cards.filter((card) => {
+    if (!checkedStatuses.includes(card.status)) return false;
+    if (company && !(card.company || '').toLowerCase().includes(company)) return false;
+    if (fitMin !== null && (typeof card.fit_score !== 'number' || card.fit_score < fitMin)) return false;
+    return true;
+  });
+};
+
+const decide = async (reviewItem, action, button) => {
   const reason = action === 'reject' ? window.prompt('Optional rejection reason:') : null;
   button.disabled = true;
   try {
-    const response = await fetch(`/api/review/items/${item.id}/decision`, {
+    const response = await fetch(`/api/review/items/${reviewItem.id}/decision`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action, approval_id: item.approval_id, actor: 'local-dashboard', reason })
+      body: JSON.stringify({ action, approval_id: reviewItem.approval_id, actor: 'local-dashboard', reason })
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Could not record the decision');
-    await loadQueue();
+    await loadAll();
   } catch (error) {
     button.disabled = false;
     window.alert(error.message);
   }
 };
 
-const renderItem = (item) => {
+const renderCard = (card) => {
   const fragment = template.content.cloneNode(true);
   const article = fragment.querySelector('.review-item');
-  fragment.querySelector('.item-meta').textContent = `${item.kind} · queued ${formatDate(item.created_at)}`;
-  fragment.querySelector('h2').textContent = item.title;
-  fragment.querySelector('.status').textContent = item.status;
-  fragment.querySelector('.status').classList.add(`status-${item.status}`);
-  fragment.querySelector('.summary').textContent = item.summary;
-  fragment.querySelector('.source-link').href = item.source_url;
+  fragment.querySelector('.item-meta').textContent = `${card.company || 'Unknown company'} · discovered ${formatDate(card.created_at)}`;
+  fragment.querySelector('h2').textContent = card.title;
+  fragment.querySelector('.status').textContent = STATUS_LABELS[card.status] || card.status;
+  fragment.querySelector('.status').classList.add(`status-${card.status}`);
+  fragment.querySelector('.summary').textContent = card.summary;
+  fragment.querySelector('.source-link').href = card.source_url;
+
   const details = fragment.querySelector('.details');
-  const fields = [['Source item', item.item_id], ['Fit score', item.fit_score === null ? null : `${item.fit_score}/10`], ['Expires', formatDate(item.expires_at)]];
+  const fields = [
+    ['Fit score', typeof card.fit_score === 'number' ? `${card.fit_score}/10` : null],
+    ['Location', card.location],
+    ['Expires', card.status === 'pending' ? formatDate(card.expires_at) : null],
+    ['Last updated', card.status !== 'pending' && card.updated_at ? formatDate(card.updated_at) : null]
+  ];
   fields.filter(([, value]) => value).forEach(([label, value]) => {
     const term = document.createElement('dt');
     term.textContent = label;
@@ -52,19 +136,30 @@ const renderItem = (item) => {
     definition.textContent = value;
     details.append(term, definition);
   });
-  if (item.artifact_url) {
+
+  if (card.artifact_url) {
     const link = fragment.querySelector('.artifact-link');
-    link.href = item.artifact_url;
+    link.href = card.artifact_url;
     link.hidden = false;
   }
-  if (item.draft) {
-    fragment.querySelector('.draft-wrap').hidden = false;
-    fragment.querySelector('.draft').textContent = item.draft;
+  if (card.company_links?.website_url) {
+    const link = fragment.querySelector('.website-link');
+    link.href = card.company_links.website_url;
+    link.hidden = false;
   }
-  if (item.evidence.length) {
+  if (card.company_links?.linkedin_url) {
+    const link = fragment.querySelector('.linkedin-link');
+    link.href = card.company_links.linkedin_url;
+    link.hidden = false;
+  }
+  if (card.draft) {
+    fragment.querySelector('.draft-wrap').hidden = false;
+    fragment.querySelector('.draft').textContent = card.draft;
+  }
+  if (card.evidence.length) {
     fragment.querySelector('.evidence-wrap').hidden = false;
     const list = fragment.querySelector('.evidence');
-    item.evidence.forEach((entry) => {
+    card.evidence.forEach((entry) => {
       const row = document.createElement('li');
       const link = document.createElement('a');
       link.href = entry.url;
@@ -76,73 +171,35 @@ const renderItem = (item) => {
       list.append(row);
     });
   }
-  article.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => decide(item, button.dataset.action, button)));
-  return fragment;
-};
-
-async function loadQueue() {
-  queue.setAttribute('aria-busy', 'true');
-  try {
-    const response = await fetch('/api/review/items?status=pending');
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Could not load the review queue');
-    queue.replaceChildren();
-    if (!payload.items.length) return showMessage(queue, 'The review queue is clear. n8n can POST a prepared packet to /api/review/items when one is ready.');
-    payload.items.forEach((item) => queue.append(renderItem(item)));
-  } catch (error) {
-    showMessage(queue, error.message, 'error');
-  } finally {
-    queue.setAttribute('aria-busy', 'false');
-  }
-}
-
-const STATUS_LABELS = { needs_review: 'Needs review', daily_cap_reached: 'Waiting for cap' };
-
-const renderListing = (job) => {
-  const fragment = listingTemplate.content.cloneNode(true);
-  const statusLabel = STATUS_LABELS[job.status] || job.status;
-  fragment.querySelector('.item-meta').textContent = `${job.company || 'Unknown company'} · discovered ${formatDate(job.created_at)}`;
-  fragment.querySelector('h2').textContent = job.title || job.source_url;
-  fragment.querySelector('.status').textContent = statusLabel;
-  fragment.querySelector('.status').classList.add(`status-${job.status}`);
-  const summary = job.evaluation?.reason || job.error || 'No further detail recorded.';
-  fragment.querySelector('.summary').textContent = summary;
-  fragment.querySelector('.source-link').href = job.source_url;
-  const details = fragment.querySelector('.details');
-  const fields = [
-    ['Fit score', job.evaluation?.fit_score === undefined || job.evaluation?.fit_score === null ? null : `${job.evaluation.fit_score}/10`],
-    ['Location', job.location],
-    ['Last updated', job.updated_at ? formatDate(job.updated_at) : null]
-  ];
-  fields.filter(([, value]) => value).forEach(([label, value]) => {
-    const term = document.createElement('dt');
-    term.textContent = label;
-    const definition = document.createElement('dd');
-    definition.textContent = value;
-    details.append(term, definition);
-  });
-  if (job.company_links?.website_url) {
-    const link = fragment.querySelector('.website-link');
-    link.href = job.company_links.website_url;
-    link.hidden = false;
-  }
-  if (job.company_links?.linkedin_url) {
-    const link = fragment.querySelector('.linkedin-link');
-    link.href = job.company_links.linkedin_url;
-    link.hidden = false;
+  if (card.status === 'pending') {
+    article.querySelectorAll('[data-action]').forEach((button) => {
+      button.hidden = false;
+      button.addEventListener('click', () => decide(card.reviewItem, button.dataset.action, button));
+    });
   }
   return fragment;
 };
 
-async function loadListings() {
+const renderResults = () => {
+  const filtered = applyFilters(allCards);
+  resultCount.textContent = `${filtered.length} of ${allCards.length} jobs`;
+  listings.replaceChildren();
+  if (!filtered.length) {
+    return showMessage(listings, allCards.length ? 'No jobs match the current filters.' : 'No jobs discovered yet. Run the discovery workflow to populate this list.');
+  }
+  filtered.forEach((card) => listings.append(renderCard(card)));
+};
+
+async function loadAll() {
   listings.setAttribute('aria-busy', 'true');
   try {
-    const response = await fetch('/api/pipeline/jobs');
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Could not load discovered jobs');
-    listings.replaceChildren();
-    if (!payload.jobs.length) return showMessage(listings, 'No jobs discovered yet. Run the discovery workflow to populate this list.');
-    payload.jobs.forEach((job) => listings.append(renderListing(job)));
+    const [jobsResponse, itemsResponse] = await Promise.all([fetch('/api/pipeline/jobs'), fetch('/api/review/items')]);
+    const jobsPayload = await jobsResponse.json();
+    const itemsPayload = await itemsResponse.json();
+    if (!jobsResponse.ok) throw new Error(jobsPayload.error || 'Could not load discovered jobs');
+    if (!itemsResponse.ok) throw new Error(itemsPayload.error || 'Could not load the review queue');
+    allCards = buildCards(jobsPayload.jobs, itemsPayload.items);
+    renderResults();
   } catch (error) {
     showMessage(listings, error.message, 'error');
   } finally {
@@ -181,7 +238,15 @@ async function loadUsage() {
   }
 }
 
-refreshButton.addEventListener('click', () => { loadQueue(); loadListings(); loadUsage(); });
-loadQueue();
-loadListings();
+statusCheckboxes.forEach((box) => box.addEventListener('change', renderResults));
+filterCompany.addEventListener('input', renderResults);
+filterFitMin.addEventListener('input', renderResults);
+clearFiltersButton.addEventListener('click', () => {
+  statusCheckboxes.forEach((box) => { box.checked = true; });
+  filterCompany.value = '';
+  filterFitMin.value = '';
+  renderResults();
+});
+refreshButton.addEventListener('click', () => { loadAll(); loadUsage(); });
+loadAll();
 loadUsage();

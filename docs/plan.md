@@ -303,12 +303,16 @@ individual posting — not an eligibility-tuning problem, the wrong kind of page
 - [x] Verified live: re-ran discovery post-fix — 6/6 results were genuine ATS postings with
       real titles and real skip reasons; Apify usage unchanged (zero scrapes needed).
 - [x] `docs/decisions.md`/`docs/changelog.md`/`docs/status.md` — logged.
-- [ ] Dashboard redesign: merge the review queue and "All discovered jobs" sections into one
+- [x] Dashboard redesign: merged the review queue and "All discovered jobs" sections into one
       filterable list with a sidebar (status checkboxes, company search, fit-score range).
-      Defaults to `needs_review` so the approve/reject workflow doesn't regress. Functional/
-      standard admin-dashboard layout over visual polish, per user's explicit priority
-      ("usable, easily manageable, easily understandable... a certain set standard kind of
-      thing"). In progress.
+      Defaults to "Pending review" checked so the approve/reject workflow doesn't regress.
+      Functional/standard admin-dashboard layout over visual polish, per user's explicit
+      priority ("usable, easily manageable, easily understandable... a certain set standard
+      kind of thing"). Resolved the `rejected` status-name collision (`PipelineStore`'s
+      aggregator-rejection vs `ReviewStore`'s human-rejection) by remapping the former to
+      `aggregator_rejected` at merge time. Verified live in-browser: unified list renders all
+      12 existing jobs, status/company/fit-score filters all work, clear-filters resets to
+      show everything. 78/78 tests still passing (no backend change needed).
 
 ## Out of scope (this block)
 

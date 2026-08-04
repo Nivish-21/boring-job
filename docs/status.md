@@ -4,22 +4,24 @@ _Last updated: 2026-08-04_
 
 ## Current state
 
-The automated daily job discovery pipeline is built, live-tested, and the review dashboard
-shows the pending-approval queue, a Firecrawl/Apify usage strip, and a full "All discovered
-jobs" listing. Discovery now targets ATS-hosted boards directly (Greenhouse/Lever/Ashby)
-instead of a generic web search, after auditing found every prior discovered URL was a
-job-board hub page, not an individual posting — root-caused and fixed, verified live (see
-`docs/decisions.md`). `OPENAI_API_KEY` still not supplied — resume classification degrades to
-`null` as designed, everything else works. 78/78 tests passing; `docker compose config --quiet`
-validates clean.
+The automated daily job discovery pipeline is built, live-tested, and the review dashboard now
+shows one unified, filterable list (sidebar: status checkboxes, company search, fit-score
+range) covering every job the pipeline has ever seen, plus a Firecrawl/Apify usage strip.
+Discovery targets ATS-hosted boards directly (Greenhouse/Lever/Ashby) instead of a generic web
+search, after auditing found every prior discovered URL was a job-board hub page, not an
+individual posting — root-caused and fixed, verified live (see `docs/decisions.md`).
+`OPENAI_API_KEY` still not supplied — resume classification degrades to `null` as designed,
+everything else works. 78/78 tests passing; `docker compose config --quiet` validates clean.
 
 ## Active plan
 
-Dashboard redesign in progress: merging the review queue and job-listings sections into one
-filterable list with a sidebar (status/company/fit-score filters), per the user's explicit ask
-— functional/usable over visually polished, "personal use" tool. Discovery-targeting fix is
-done and pushed. After the redesign: wire up `workflows/scheduled-job-discovery.json` in n8n
-for real unattended daily runs (user's stated next step), and `OPENAI_API_KEY` from the user
+Dashboard redesign is done, verified live, and pushed. Next: wire up
+`workflows/scheduled-job-discovery.json` in n8n for real unattended daily runs (user's stated
+next step). Also pending: a new task the user raised mid-session — using the 8 real resume
+files (not just their README metadata) as reference material for the LLM when generating
+packet drafts, so structure/tone/experience details can be reused instead of re-derived or
+re-asked. Flagged a real tradeoff before building (see `docs/decisions.md` once logged) and
+proposing a plan block for approval before touching any code. `OPENAI_API_KEY` from the user
 when ready (optional, resume-bucket auto-suggestion only).
 
 ## Major decisions

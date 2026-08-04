@@ -185,3 +185,29 @@ job-board hub/category page, not an individual posting (see `docs/decisions.md`)
 real titles and real skip reasons (senior-level requirements), not aggregator garbage. Apify
 usage was unchanged (zero scrapes needed, free ATS verification for all 6); Firecrawl spend
 matched exactly what the search + per-job company lookups should cost.
+
+## 2026-08-04 — Dashboard redesign: one filterable list with a sidebar
+
+Merged the review queue and "All discovered jobs" sections into a single unified,
+client-side-filterable list (see `docs/decisions.md`).
+
+**Changed:**
+- `worker/public/index.html` — replaced the two sections + two `<template>`s with one sidebar
+  (status checkboxes, company search, minimum-fit-score input, clear-filters button) and one
+  results list using a single merged `#item-template`.
+- `worker/public/app.js` — rewritten: `loadAll()` fetches `/api/pipeline/jobs` and
+  `/api/review/items` (both unfiltered) in parallel, `buildCards()` merges them (review item is
+  the source of truth for any job with a `review_item_id`; `PipelineStore`'s `'rejected'`
+  remapped to `aggregator_rejected`), `applyFilters()`/`renderResults()` handle the sidebar.
+  Approve/reject/regenerate actions only render for `status === 'pending'` cards.
+- `worker/public/styles.css` — added `.layout`/`.sidebar`/`.filter-group`/`.results` grid,
+  `.status-approved`/`.status-rejected`/`.status-aggregator_rejected` colors, widened `.shell`
+  to `1180px` to fit the sidebar, sidebar collapses to full-width above the content below
+  `820px`.
+
+**No backend changes** — both endpoints already returned everything needed. 78/78 tests still
+passing.
+
+**Verified live:** rebuilt the image, checked in-browser — all 12 existing jobs render in the
+unified list, status checkboxes/company search/fit-score filters all narrow the list correctly,
+clear-filters resets to show everything.

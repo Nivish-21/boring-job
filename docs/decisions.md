@@ -228,3 +228,23 @@ run matched exactly what was expected from the search + per-job company lookups,
 that is simultaneously (a) guaranteed to be a single real job posting, and (b) free to verify,
 since this pipeline already has a public-API-based verifier for all three. Biasing discovery
 toward them fixes quality and cost at the same time, rather than trading one for the other.
+
+## 2026-08-04 — Dashboard: one merged list instead of two, `rejected` remapped to avoid a status collision
+
+**Context:** The queue (pending review) and "All discovered jobs" sections were fully separate
+in both markup and fetch logic, duplicating the card layout and giving the user two lists to
+scan instead of one filterable view.
+
+**Decision:** Merge client-side in `app.js`: fetch both `/api/pipeline/jobs` (all statuses) and
+`/api/review/items` (all statuses) on every load, and for each pipeline job with a
+`review_item_id`, treat the matching review item as the source of truth for status/draft/
+evidence/actions (since `decide()` never writes back to the pipeline record). All other
+pipeline jobs render read-only. `PipelineStore`'s own `'rejected'` status (aggregator-domain
+rejection, pre-verification) is remapped to a distinct `aggregator_rejected` display status so
+it can't collide with `ReviewStore`'s human-decision `'rejected'` status once both feed the same
+sidebar checkbox list.
+
+**Reasoning:** A single merged, filterable list matches the user's explicit ask ("usable, easily
+manageable, easily understandable") and avoids two divergent copies of the same card-rendering
+logic. Client-side merge (not a new backend endpoint) was chosen because both existing endpoints
+already return everything needed — no new server-side work or schema change required.
