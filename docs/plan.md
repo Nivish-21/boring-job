@@ -282,6 +282,34 @@ human review — user's explicit ask, plus company profile (website/LinkedIn) on
 re-verification on every retry until they clear the cap — would need caching the verified job
 body across runs to fix properly; out of scope here.
 
+## New task block: discovery targeting fix + dashboard redesign (2026-08-04)
+
+**Goal:** User flagged that most discovered jobs are "completely useless" and asked for a
+smarter scraping strategy, plus a redesigned, filterable dashboard.
+
+**Root cause found:** every URL the old generic discovery query found was a job-board hub/
+category page (LinkedIn job-search page, WeWorkRemotely category page, etc.), never an
+individual posting — not an eligibility-tuning problem, the wrong kind of page entirely.
+
+**Steps:**
+- [x] `worker/src/server.mjs` — `DEFAULT_DISCOVERY_QUERY` retargeted to
+      `site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com`. Verified live
+      against the real Firecrawl API before committing: 10/10 results valid, same 2-credit cost.
+- [x] `worker/src/job-pipeline.mjs` — aggregator-hostname guard rejects known job-board hub
+      domains before `verify()` is called (`status: 'rejected'`, zero cost). Excludes the ATS
+      platforms themselves.
+- [x] Tests: 2 new confirming aggregator URLs never call `verify()` and legitimate ATS/career
+      URLs aren't rejected. 78/78 passing.
+- [x] Verified live: re-ran discovery post-fix — 6/6 results were genuine ATS postings with
+      real titles and real skip reasons; Apify usage unchanged (zero scrapes needed).
+- [x] `docs/decisions.md`/`docs/changelog.md`/`docs/status.md` — logged.
+- [ ] Dashboard redesign: merge the review queue and "All discovered jobs" sections into one
+      filterable list with a sidebar (status checkboxes, company search, fit-score range).
+      Defaults to `needs_review` so the approve/reject workflow doesn't regress. Functional/
+      standard admin-dashboard layout over visual polish, per user's explicit priority
+      ("usable, easily manageable, easily understandable... a certain set standard kind of
+      thing"). In progress.
+
 ## Out of scope (this block)
 
 - Founder/personal contact discovery, LinkedIn profile scraping, or outreach

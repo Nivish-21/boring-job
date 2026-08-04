@@ -188,3 +188,43 @@ actually finds — hiding them from the dashboard means the user only sees the ~
 every gate, with no way to audit or sanity-check the other 95%, or notice when a company or
 posting keeps coming up. Company profile only makes sense on jobs that were actually
 live-verified (unverified/expired jobs have no job data to look up in the first place).
+
+---
+
+## 2026-08-04 — Discovery query re-targeted to ATS-hosted boards; aggregator URLs rejected before verification
+
+**Context:** Auditing the job-listings view (previous entry) surfaced the real reason so much
+discovery was "wasted": every single URL found by the original generic query
+(`remote backend software engineer job posting India eligible`) was a job-board **category or
+search-results page** — `linkedin.com/jobs/software-engineer-jobs`,
+`weworkremotely.com/categories/remote-back-end-programming-jobs`,
+`wellfound.com/role/l/backend-engineer/india` — never an individual posting. Evaluating a hub
+page as if it were one job's description was never going to produce a real match; this wasn't
+an eligibility-tuning problem, it was scraping the wrong kind of page entirely. User's own
+framing: "if many are wasted then it's completely useless."
+
+**Decision:**
+- `DEFAULT_DISCOVERY_QUERY` changed to `remote backend software engineer india
+  (site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com)`. Verified live
+  against the real Firecrawl `/v2/search` API before committing to this: a combined
+  three-platform query returned 10/10 valid ATS-hosted job-posting URLs for the same 2 credits
+  as the old single-provider test call — i.e. no extra search cost for dramatically better
+  targeting. `DISCOVERY_QUERY` in `.env` still overrides this if the user wants to broaden it.
+- New `JobPipeline.process()` guard: any discovered URL on a known aggregator/job-board
+  hostname (LinkedIn, WeWorkRemotely, Wellfound, Indeed, Glassdoor, ZipRecruiter, Naukri,
+  Monster, SimplyHired, BuiltIn, Crossover, RemoteRocketship) is rejected immediately —
+  persisted with `status: 'rejected'` — before `verify()` is ever called, so it costs zero
+  Firecrawl/Apify credits. Deliberately excludes `greenhouse.io`/`lever.co`/`ashbyhq.com`
+  themselves, since those are exactly the individual postings this pipeline wants.
+
+**Verified live (post-fix discovery run):** 6/6 discovered URLs were genuine ATS-hosted
+postings with real titles ("Staff Software Engineer, Backend", "Senior Backend Software
+Engineer", etc.) and real, meaningful skip reasons (senior-level requirements) — not aggregator
+false positives. Apify usage was unchanged (`$0.176` before and after — zero scrapes needed,
+every job verified for free via the ATS's own public API), and Firecrawl credit spend for the
+run matched exactly what was expected from the search + per-job company lookups, not scraping.
+
+**Reasoning:** ATS-hosted postings (Greenhouse/Lever/Ashby) are the one class of discovered URL
+that is simultaneously (a) guaranteed to be a single real job posting, and (b) free to verify,
+since this pipeline already has a public-API-based verifier for all three. Biasing discovery
+toward them fixes quality and cost at the same time, rather than trading one for the other.

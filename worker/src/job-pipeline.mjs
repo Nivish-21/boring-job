@@ -11,6 +11,24 @@ const computeStableId = (selection) => {
   return `manual:${selection.source_url}`;
 };
 
+// Job-board/aggregator hub domains -- category and search-results pages, never a single job
+// posting. Discovering one of these wastes a full Firecrawl/Apify scrape on unusable content
+// (see docs/decisions.md). Excludes the ATS platforms themselves (greenhouse.io/lever.co/
+// ashbyhq.com), which are the individual postings this pipeline actually wants.
+const AGGREGATOR_HOSTNAMES = [
+  'linkedin.com', 'indeed.com', 'glassdoor.com', 'ziprecruiter.com', 'wellfound.com',
+  'weworkremotely.com', 'ambitionbox.com', 'naukri.com', 'monster.com', 'simplyhired.com',
+  'builtin.com', 'crossover.com', 'remoterocketship.com'
+];
+const isAggregatorUrl = (sourceUrl) => {
+  try {
+    const hostname = new URL(sourceUrl).hostname.replace(/^www\./, '');
+    return AGGREGATOR_HOSTNAMES.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+  } catch {
+    return false;
+  }
+};
+
 const SUPPORTED_STACK = [['Node.js', /\bnode(?:\.js)?\b/i], ['JavaScript', /\bjavascript\b/i], ['TypeScript', /\btypescript\b/i], ['Python', /\bpython\b/i], ['FastAPI', /\bfastapi\b/i], ['Django', /\bdjango\b/i], ['Docker', /\bdocker\b/i], ['PostgreSQL', /\bpostgres(?:ql)?\b/i]];
 const EXCLUDED_STACK = [['mobile-only', /\b(?:android|ios|swift|react native|flutter)\b/i], ['data-science/ML-infrastructure', /\b(?:data scientist|machine learning engineer|ml infrastructure|gpu|cuda)\b/i], ['specialist language', /\b(?:kotlin|golang|go developer|rust|ruby on rails|c\+\+|embedded c)\b/i]];
 const cleanText = (value, max = 400) => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '';
@@ -59,6 +77,13 @@ export class JobPipeline {
     Object.assign(this, { store, reviewStore, artifactDir, verify, verifyFallback, resumeClassifier, resumeBuckets, companyLookup, dailyCap });
   }
   async process({ source_url: sourceUrl, candidate } = {}) {
+    // Reject known aggregator/job-board hub pages before spending anything -- they're category
+    // or search-results pages, never a single job posting, so verifying one is pure waste.
+    if (isAggregatorUrl(sourceUrl)) {
+      const record = await this.store.record({ stable_id: `manual:${sourceUrl}`, status: 'rejected', source_url: sourceUrl, error: 'Known job-board aggregator domain, not an individual posting.' });
+      return { stage: 'rejected', record };
+    }
+
     // Dedupe by the URL's own provider-derived ID before spending anything on verification —
     // a URL already recorded as needs_review/skipped/expired/unverified is not worth re-paying
     // Firecrawl/Apify for on every discovery run (see docs/decisions.md). daily_cap_reached is

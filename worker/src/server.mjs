@@ -74,7 +74,7 @@ const serveStatic = async (res, pathname) => {
   }
 };
 
-const PIPELINE_JOB_STATUSES = ['needs_review', 'approved', 'skipped', 'expired', 'unverified', 'daily_cap_reached'];
+const PIPELINE_JOB_STATUSES = ['needs_review', 'approved', 'skipped', 'expired', 'unverified', 'daily_cap_reached', 'rejected'];
 
 export const createApp = ({ store, pipeline, pipelineStore, discoveryRunner, artifactDir, auth, firecrawlApiKey, apifyApiToken }) => createServer(async (req, res) => {
   const url = new URL(req.url, 'http://worker.local');
@@ -142,7 +142,9 @@ export const createApp = ({ store, pipeline, pipelineStore, discoveryRunner, art
   }
 });
 
-const DEFAULT_DISCOVERY_QUERY = 'remote backend software engineer job posting India eligible';
+// Biased toward ATS-hosted boards (Greenhouse/Lever/Ashby): individual postings, not job-board
+// hub pages, and free to verify via each ATS's public API once discovered (see docs/decisions.md).
+const DEFAULT_DISCOVERY_QUERY = 'remote backend software engineer india (site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com)';
 
 export const startWorker = async ({
   port = Number(process.env.PORT || 8080),

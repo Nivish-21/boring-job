@@ -163,3 +163,25 @@ visible.
 **Known limitation, not solved today:** a `daily_cap_reached` job still pays for
 re-verification on every retry until it clears the cap — avoiding that would mean caching the
 verified job body across runs, out of scope for this pass.
+
+## 2026-08-04 — Discovery re-targeted to ATS boards; aggregator pages rejected before verification
+
+Root-caused why so much discovery was wasted: every URL the old generic query found was a
+job-board hub/category page, not an individual posting (see `docs/decisions.md`).
+
+**Changed:**
+- `worker/src/server.mjs` — `DEFAULT_DISCOVERY_QUERY` now targets Greenhouse/Lever/Ashby via
+  `site:` operators. Verified live: 10/10 results were valid ATS postings, same 2-credit cost
+  as before.
+- `worker/src/job-pipeline.mjs` — new aggregator-hostname guard rejects known job-board hub
+  domains (LinkedIn, WeWorkRemotely, Wellfound, Indeed, Glassdoor, ZipRecruiter, Naukri,
+  Monster, SimplyHired, BuiltIn, Crossover, RemoteRocketship) before `verify()` is ever called
+  — persisted as `status: 'rejected'`, zero credit cost. Excludes the ATS platforms themselves.
+
+**Tests:** 2 new (`job-pipeline.test.mjs`) confirming a known aggregator URL never calls
+`verify()`, and that a legitimate ATS/career-page URL isn't rejected. 78/78 passing.
+
+**Verified live:** re-ran discovery after the fix — 6/6 results were genuine ATS postings with
+real titles and real skip reasons (senior-level requirements), not aggregator garbage. Apify
+usage was unchanged (zero scrapes needed, free ATS verification for all 6); Firecrawl spend
+matched exactly what the search + per-job company lookups should cost.

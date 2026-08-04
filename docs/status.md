@@ -4,20 +4,23 @@ _Last updated: 2026-08-04_
 
 ## Current state
 
-The automated daily job discovery pipeline is built, live-tested, and the review dashboard now
-shows: the pending-approval queue, a Firecrawl/Apify usage strip, and a full "All discovered
-jobs" listing (every status, with company profiles). `OPENAI_API_KEY` still not supplied —
-resume classification degrades to `null` as designed, everything else works. Three real cost
-bugs and one CSS bug found this session were fixed and verified live (see `docs/decisions.md`).
-76/76 tests passing; `docker compose config --quiet` validates clean.
+The automated daily job discovery pipeline is built, live-tested, and the review dashboard
+shows the pending-approval queue, a Firecrawl/Apify usage strip, and a full "All discovered
+jobs" listing. Discovery now targets ATS-hosted boards directly (Greenhouse/Lever/Ashby)
+instead of a generic web search, after auditing found every prior discovered URL was a
+job-board hub page, not an individual posting — root-caused and fixed, verified live (see
+`docs/decisions.md`). `OPENAI_API_KEY` still not supplied — resume classification degrades to
+`null` as designed, everything else works. 78/78 tests passing; `docker compose config --quiet`
+validates clean.
 
 ## Active plan
 
-`docs/plan.md` — build is complete and live-verified end to end, including the usage strip and
-job-listings view. Next up (user's own words): "then we are wiring up the n8n workflow" — i.e.
-actually importing/activating `workflows/scheduled-job-discovery.json` in n8n for real
-unattended daily runs. Not started yet. Only other remaining item: `OPENAI_API_KEY` from the
-user for automatic resume-bucket suggestions (everything else already works without it).
+Dashboard redesign in progress: merging the review queue and job-listings sections into one
+filterable list with a sidebar (status/company/fit-score filters), per the user's explicit ask
+— functional/usable over visually polished, "personal use" tool. Discovery-targeting fix is
+done and pushed. After the redesign: wire up `workflows/scheduled-job-discovery.json` in n8n
+for real unattended daily runs (user's stated next step), and `OPENAI_API_KEY` from the user
+when ready (optional, resume-bucket auto-suggestion only).
 
 ## Major decisions
 
@@ -40,6 +43,11 @@ See `docs/decisions.md` for full reasoning. Summary:
 - The dashboard shows every discovered job (not just accepted ones), and company-profile
   lookup now runs for every live-verified job — user's explicit ask: "if you are not showing
   it to me then what's the purpose of scraping it?"
+- Discovery query re-targeted to `site:boards.greenhouse.io OR site:jobs.lever.co OR
+  site:jobs.ashbyhq.com` — same search cost, but finds individual postings instead of
+  job-board hub pages, and those postings verify for free via each ATS's public API.
+- Known aggregator/job-board hostnames (LinkedIn, WeWorkRemotely, Wellfound, etc.) are now
+  rejected in `JobPipeline.process()` before `verify()` is ever called — zero credit cost.
 
 ## Minor decisions
 
@@ -81,6 +89,7 @@ See `docs/decisions.md` for full reasoning. Summary:
 
 ## Next steps
 
-1. Wire up `workflows/scheduled-job-discovery.json` in n8n for real unattended daily runs
-   (explicitly the user's stated next step).
-2. User supplies `OPENAI_API_KEY` when ready (optional, resume-bucket auto-suggestion only).
+1. Dashboard redesign: merge queue + listings into one filterable list with a sidebar
+   (in progress).
+2. Wire up `workflows/scheduled-job-discovery.json` in n8n for real unattended daily runs.
+3. User supplies `OPENAI_API_KEY` when ready (optional, resume-bucket auto-suggestion only).

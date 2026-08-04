@@ -15,6 +15,52 @@ const verifiedJob = {
   }
 };
 
+test('rejects known aggregator/job-board hub URLs without ever calling verify', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  let verifyCalls = 0;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => { verifyCalls += 1; return verifiedJob; }
+  });
+
+  try {
+    const result = await pipeline.process({ source_url: 'https://weworkremotely.com/categories/remote-back-end-programming-jobs' });
+    assert.equal(result.stage, 'rejected');
+    assert.equal(result.record.status, 'rejected');
+    assert.equal(verifyCalls, 0, 'a known aggregator URL must never pay for verification');
+
+    const listed = await pipelineStore.list({ status: 'rejected' });
+    assert.equal(listed.length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('does not reject a legitimate ATS-hosted or single-company career page', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob
+  });
+
+  try {
+    const greenhouse = await pipeline.process({ source_url: verifiedJob.source_url });
+    assert.notEqual(greenhouse.stage, 'rejected');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('evaluates hard restrictions before creating an application packet', () => {
   const evaluation = evaluateJob({ ...verifiedJob.job, location: 'US only', description_text: 'Senior Android engineer, 5 years of experience.' });
   assert.equal(evaluation.recommendation, 'skip');
