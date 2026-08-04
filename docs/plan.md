@@ -435,4 +435,54 @@ anything else built this session. Recommending against building that path.
       auto-sends — matches this project's standing rule.
 - [ ] Display timestamps for this feature in IST specifically.
 
-**Awaiting the user's go-ahead before any of this is built.**
+**Approved to build 2026-08-04 (user asked "can you build a code for this?"). No postgres/n8n
+needed** — confirmed this reuses the single-service worker architecture already in place
+(file-based JSON stores, same pattern as everything else); answered directly, no new
+infrastructure required.
+
+**Paused mid-build 2026-08-04 — user going out, resume next session.** No code was written yet
+(only re-read `pipeline-store.mjs`, `company-lookup.mjs`, `fit-evaluator.mjs` as patterns to
+mirror). **Do not open the next session by asking for the LinkedIn connections CSV** — user was
+explicit about this. Just resume building from the design below; the CSV/file question can wait
+until the code actually needs it to run end-to-end.
+
+**Design worked out, ready to implement next session:**
+- `worker/src/connections-catalog.mjs` — `parseConnectionsCsv(csvText)`: LinkedIn's real export
+  has a "Notes:" preamble before the actual header row (`First Name,Last Name,URL,Email
+  Address,Company,Position,Connected On`), so the parser must scan for the line starting with
+  `First Name,Last Name` rather than assuming line 0 is the header. Needs a small hand-rolled
+  quoted-CSV-cell splitter (company/position names can contain commas) — no new dependency,
+  matches this project's zero-runtime-dependency pattern (`worker/package.json` has none).
+  Exports `isFounderTitle(position)` (keyword regex: founder, co-founder, cofounder, founding,
+  ceo, chief executive) and `filterFounders(connections)`.
+- `worker/src/founder-store.mjs` — new store, same atomic-JSON-file shape as `pipeline-store.mjs`
+  (`record()`/`getByStableId()`/`list()`, keyed by `profile_url`), so a founder already processed
+  on a prior run isn't re-researched (re-spending Firecrawl/OpenAI calls) on the next import.
+- `worker/src/founder-outreach.mjs` — new module: `findCareersUrl(companyName, websiteUrl, ...)`
+  (Firecrawl search biased toward `<company> careers`/`<company> jobs`, plus checking for a
+  Greenhouse/Lever/Ashby board via the existing `provider-selector.mjs` detection), and
+  `draftOutreachMessage({ founder, companySummary, matchedJob, resumeBucket }, { apiKey,
+  fetchImpl, model })` — OpenAI call shaped exactly like `classifyResumeBucket()` in
+  `fit-evaluator.mjs` (degrades to a null/reason result on any failure, never throws).
+- `FounderOutreachRunner` (likely in `founder-outreach.mjs` or its own file): for each new
+  founder — `lookupCompany()` (existing, unchanged) → `findCareersUrl()` → any job URLs found go
+  through the **unmodified** `pipeline.process()` (the same `JobPipeline` instance already
+  constructed in `startWorker()`) → draft the message (role-specific if a job matched, generic
+  value-add otherwise) → `reviewStore.create({ kind: 'founder', item_id: profile_url, title:
+  '<name> — <company>', source_url: profile_url, summary, draft, evidence: [company website,
+  matched job if any] })`. **`ReviewStore` already accepts `kind: 'founder'`** — this was built
+  into `review-store.mjs` from the start of the project, so no store schema change is needed
+  there. Mark the founder processed via `founderStore.record()` regardless of outcome (mirrors
+  the pipeline's own "persist every outcome, never re-pay for a dead end" rule).
+- New route: `POST /api/founders/import` — accepts the raw CSV as the request body
+  (`content-type: text/csv`), no file path/bind mount needed. Cap founders processed per import
+  (mirror `dailyCap` — cost control, same reasoning as the job-discovery cap).
+- **Dashboard gap to close:** `worker/public/app.js`'s `buildCards()` currently only iterates
+  `pipelineJobs` and looks up a matching review item via `job.review_item_id` — a `kind:
+  'founder'` review item has no pipeline-job counterpart, so it would never appear in the merged
+  list as-is. Need to also render any review items *not* referenced by a pipeline job's
+  `review_item_id` (currently that's only ever founder items). Add a "Founder outreach" vs "Job"
+  badge/kind indicator on cards once both kinds are mixed in one list.
+- IST timestamps: format founder-outreach card timestamps with
+  `Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', ... })` explicitly (not
+  `undefined`/browser-local like the job cards), since the user asked for IST specifically here.
