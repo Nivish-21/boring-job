@@ -61,11 +61,13 @@ export class JobPipeline {
   async process({ source_url: sourceUrl, candidate } = {}) {
     // Dedupe by the URL's own provider-derived ID before spending anything on verification —
     // a URL already recorded as needs_review/skipped/expired/unverified is not worth re-paying
-    // Firecrawl/Apify for on every discovery run (see docs/decisions.md).
+    // Firecrawl/Apify for on every discovery run (see docs/decisions.md). daily_cap_reached is
+    // the one non-terminal status: today's cap doesn't mean the job is bad, so it stays
+    // eligible for a future run to actually verify and queue it.
     const selection = selectProvider(sourceUrl);
     const priorStableId = computeStableId(selection);
     const priorRecord = await this.store.getByStableId(priorStableId);
-    if (priorRecord) return { stage: 'duplicate', existing: priorRecord };
+    if (priorRecord && priorRecord.status !== 'daily_cap_reached') return { stage: 'duplicate', existing: priorRecord };
 
     let verification = await this.verify(sourceUrl);
     if (verification.liveness === 'unverified' && this.verifyFallback) {
@@ -73,34 +75,41 @@ export class JobPipeline {
     }
     if (verification.liveness !== 'live') {
       const status = verification.liveness === 'closed' ? 'expired' : 'unverified';
-      const record = await this.store.record({ stable_id: priorStableId, status, source_url: selection.source_url });
+      const record = await this.store.record({ stable_id: priorStableId, status, source_url: selection.source_url, error: verification.error || null });
       return { stage: status === 'expired' ? 'expired' : 'manual_review', verification, record };
     }
     const existing = await this.store.getByStableId(verification.job.stable_id);
     if (existing?.status === 'needs_review' || existing?.status === 'approved') return { stage: 'duplicate', existing, verification };
     const evaluation = evaluateJob(verification.job);
+    // Company profile is looked up for every live-verified job (not just accepted ones) so the
+    // full job-listings view has context even on skipped/capped entries -- see docs/decisions.md.
+    const companyLinks = this.companyLookup ? await this.companyLookup(companyName(verification)) : null;
+    const listingFields = { title: verification.job.title, location: verification.job.location, company: companyName(verification), company_links: companyLinks };
+
     if (evaluation.recommendation === 'skip') {
-      const record = await this.store.record({ stable_id: verification.job.stable_id, status: 'skipped', source_url: verification.job.source_url, evaluation });
+      const record = await this.store.record({ stable_id: verification.job.stable_id, status: 'skipped', source_url: verification.job.source_url, evaluation, ...listingFields });
       return { stage: 'skipped', verification, evaluation, record };
     }
 
     const startOfDayUtc = new Date();
     startOfDayUtc.setUTCHours(0, 0, 0, 0);
     const createdToday = await this.store.countCreatedSince(startOfDayUtc.toISOString());
-    if (createdToday >= this.dailyCap) return { stage: 'daily_cap_reached', verification, evaluation };
+    if (createdToday >= this.dailyCap) {
+      const record = await this.store.record({ stable_id: verification.job.stable_id, status: 'daily_cap_reached', source_url: verification.job.source_url, evaluation, ...listingFields });
+      return { stage: 'daily_cap_reached', verification, evaluation, record };
+    }
 
     const resumeMatch = this.resumeClassifier && this.resumeBuckets.length
       ? await this.resumeClassifier(verification.job, this.resumeBuckets)
       : null;
     const resumeBucket = resumeMatch?.bucket_id ? this.resumeBuckets.find((bucket) => bucket.id === resumeMatch.bucket_id) : null;
-    const companyLinks = this.companyLookup ? await this.companyLookup(companyName(verification)) : null;
 
     await mkdir(this.artifactDir, { recursive: true });
     const artifactPath = join(this.artifactDir, `packet-${randomUUID()}.md`);
     const draft = packetDraft(verification.job, evaluation, candidate, { resumeBucket, companyLinks });
     await writeFile(artifactPath, draft, { encoding: 'utf8', mode: 0o600 });
     const review = await this.reviewStore.create({ item_id: verification.job.stable_id, kind: 'job', title: `${verification.job.title || 'Untitled role'} — ${companyName(verification)}`, source_url: verification.job.source_url, summary: `${evaluation.reason} Location: ${evaluation.location_status}. This draft requires human review before any application action.`, draft, fit_score: evaluation.fit_score, evidence: evaluation.evidence });
-    const record = await this.store.record({ stable_id: verification.job.stable_id, status: 'needs_review', source_url: verification.job.source_url, artifact_path: artifactPath, review_item_id: review.id, evaluation });
+    const record = await this.store.record({ stable_id: verification.job.stable_id, status: 'needs_review', source_url: verification.job.source_url, artifact_path: artifactPath, review_item_id: review.id, evaluation, ...listingFields });
     return { stage: 'needs_review', verification, evaluation, artifact_path: artifactPath, review, record };
   }
 }

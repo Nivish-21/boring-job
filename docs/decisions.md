@@ -148,3 +148,43 @@ alerting/thresholds beyond a simple in-page color change at ≤20% remaining.
 from paid scrape/search operations — reading current balance this way needs no local usage
 counter or extra bookkeeping, and reflects the provider's own authoritative number rather than
 an estimate the pipeline could get out of sync with.
+
+---
+
+## 2026-08-04 — Full job-listings view, company profile on every listing, and daily_cap_reached persistence
+
+**Context:** User wants to see every job the pipeline scrapes, every day — not just the ones
+that pass the eligibility gate and reach human review. Direct quote: "if you are not showing it
+to me then what's the purpose of scraping it?" They also asked for the company profile
+(website + LinkedIn) on those listings, not just the accepted ones.
+
+**Decision:**
+- New `PipelineStore.list({status})` and `GET /api/pipeline/jobs` — surfaces every job record
+  (`needs_review`, `skipped`, `expired`, `unverified`, `daily_cap_reached`), most-recent-first,
+  optionally filtered by status.
+- `companyLookup` now runs for every live-verified job, not only ones that reach
+  `needs_review` — moved earlier in `JobPipeline.process()`, right after `evaluateJob()`, so
+  `skipped` and `daily_cap_reached` records get `title`/`location`/`company`/`company_links`
+  too. **Cost tradeoff, stated plainly:** this roughly doubles how often the company-lookup
+  Firecrawl searches fire, since skipped jobs are typically the majority of what's discovered.
+  Still cheap per call relative to the account's credit budget (see the usage-tracking entry
+  above), but flagging it since credit usage is something actively being watched this session.
+- `daily_cap_reached` is now persisted (previously vanished with zero trace — the exact same
+  unpersisted-record bug already fixed twice today for `manual_review`/`expired`), but is
+  explicitly excluded from the pre-verification duplicate short-circuit, so a job capped today
+  stays eligible to actually reach `needs_review` on a later run instead of being silently lost.
+  This does mean a capped job still pays for re-verification on each retry — a known, accepted
+  limitation, not solved today (would need caching the verified job body across runs, out of
+  scope for this pass).
+- Fixed a real, pre-existing CSS bug found while building this: `.button { display:
+  inline-flex; }` was overriding the browser's default `[hidden] { display: none }` for every
+  `.button[hidden]` element (author styles always beat the UA stylesheet regardless of selector
+  specificity) — meaning the existing `.artifact-link[hidden]` was already silently broken
+  before this session, not just the two new company-link buttons. Fixed with a `.button[hidden]
+  { display: none; }` override.
+
+**Reasoning:** Skipped/expired/unverified jobs are the majority of what a daily discovery run
+actually finds — hiding them from the dashboard means the user only sees the ~5% that pass
+every gate, with no way to audit or sanity-check the other 95%, or notice when a company or
+posting keeps coming up. Company profile only makes sense on jobs that were actually
+live-verified (unverified/expired jobs have no job data to look up in the first place).

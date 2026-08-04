@@ -25,9 +25,13 @@ h3 { margin: 1.5rem 0 .65rem; font-size: .95rem; }
 .lede { max-width: 60ch; margin: .65rem 0 0; color: var(--muted); line-height: 1.55; }
 .notice { margin: 1.5rem 0; padding: .9rem 1rem; background: var(--surface); color: var(--muted); border-radius: 10px; line-height: 1.45; }
 .queue { display: grid; gap: 1rem; }
+.section-heading { margin: 3rem 0 1.5rem; padding-top: 2rem; border-top: 1px solid var(--line); }
+.section-heading h2 { font-size: 1.5rem; }
 .review-item { padding: 1.4rem; border: 1px solid var(--line); border-radius: 12px; }
 .item-heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
 .status { flex: 0 0 auto; padding: .28rem .55rem; border-radius: 999px; background: var(--surface); color: var(--primary); font-size: .8rem; font-weight: 700; text-transform: capitalize; }
+.status-skipped, .status-expired, .status-unverified { color: var(--muted); }
+.status-daily_cap_reached { color: oklch(0.55 0.14 70); }
 .summary { max-width: 72ch; margin: 1rem 0; line-height: 1.55; }
 .details { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; margin: 1rem 0; color: var(--muted); font-size: .9rem; }
 .details dt { font-weight: 650; color: var(--ink); }
@@ -37,6 +41,7 @@ h3 { margin: 1.5rem 0 .65rem; font-size: .95rem; }
 .evidence a { color: var(--primary); }
 .actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.5rem; }
 .button { display: inline-flex; align-items: center; justify-content: center; min-height: 2.4rem; padding: .5rem .8rem; border: 1px solid transparent; border-radius: 8px; color: var(--ink); cursor: pointer; font-weight: 650; text-decoration: none; transition: background-color 180ms ease-out, border-color 180ms ease-out, color 180ms ease-out; }
+.button[hidden] { display: none; }
 .button:focus-visible { outline: 3px solid oklch(0.72 0.10 230 / .55); outline-offset: 2px; }
 .button:disabled { cursor: wait; opacity: .6; }
 .button-primary { background: var(--primary); color: oklch(1 0 0); }

@@ -25,3 +25,25 @@ test('countCreatedSince counts only needs_review jobs created on or after the cu
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('list returns every job most-recent-first, optionally filtered by status', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-store-'));
+  const filePath = join(root, 'pipeline.json');
+  const store = new PipelineStore(filePath);
+
+  try {
+    await store.initialize();
+    await store.record({ stable_id: 'greenhouse:acme:1', status: 'needs_review', source_url: 'https://a.com/1' });
+    await store.record({ stable_id: 'greenhouse:acme:2', status: 'skipped', source_url: 'https://a.com/2' });
+    await store.record({ stable_id: 'greenhouse:acme:3', status: 'needs_review', source_url: 'https://a.com/3' });
+
+    const all = await store.list();
+    assert.equal(all.length, 3);
+    assert.deepEqual(all.map((job) => job.stable_id), ['greenhouse:acme:3', 'greenhouse:acme:2', 'greenhouse:acme:1']);
+
+    const skippedOnly = await store.list({ status: 'skipped' });
+    assert.deepEqual(skippedOnly.map((job) => job.stable_id), ['greenhouse:acme:2']);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

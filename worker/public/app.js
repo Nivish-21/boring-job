@@ -1,17 +1,19 @@
 const queue = document.querySelector('#queue');
+const listings = document.querySelector('#listings');
 const usage = document.querySelector('#usage');
 const template = document.querySelector('#item-template');
+const listingTemplate = document.querySelector('#listing-template');
 const refreshButton = document.querySelector('#refresh');
 
 const formatDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 const formatResetDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
 
-const showMessage = (message, type = 'info') => {
-  queue.replaceChildren();
+const showMessage = (container, message, type = 'info') => {
+  container.replaceChildren();
   const panel = document.createElement('section');
   panel.className = `message message-${type}`;
   panel.textContent = message;
-  queue.append(panel);
+  container.append(panel);
 };
 
 const decide = async (item, action, button) => {
@@ -85,12 +87,66 @@ async function loadQueue() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Could not load the review queue');
     queue.replaceChildren();
-    if (!payload.items.length) return showMessage('The review queue is clear. n8n can POST a prepared packet to /api/review/items when one is ready.');
+    if (!payload.items.length) return showMessage(queue, 'The review queue is clear. n8n can POST a prepared packet to /api/review/items when one is ready.');
     payload.items.forEach((item) => queue.append(renderItem(item)));
   } catch (error) {
-    showMessage(error.message, 'error');
+    showMessage(queue, error.message, 'error');
   } finally {
     queue.setAttribute('aria-busy', 'false');
+  }
+}
+
+const STATUS_LABELS = { needs_review: 'Needs review', daily_cap_reached: 'Waiting for cap' };
+
+const renderListing = (job) => {
+  const fragment = listingTemplate.content.cloneNode(true);
+  const statusLabel = STATUS_LABELS[job.status] || job.status;
+  fragment.querySelector('.item-meta').textContent = `${job.company || 'Unknown company'} · discovered ${formatDate(job.created_at)}`;
+  fragment.querySelector('h2').textContent = job.title || job.source_url;
+  fragment.querySelector('.status').textContent = statusLabel;
+  fragment.querySelector('.status').classList.add(`status-${job.status}`);
+  const summary = job.evaluation?.reason || job.error || 'No further detail recorded.';
+  fragment.querySelector('.summary').textContent = summary;
+  fragment.querySelector('.source-link').href = job.source_url;
+  const details = fragment.querySelector('.details');
+  const fields = [
+    ['Fit score', job.evaluation?.fit_score === undefined || job.evaluation?.fit_score === null ? null : `${job.evaluation.fit_score}/10`],
+    ['Location', job.location],
+    ['Last updated', job.updated_at ? formatDate(job.updated_at) : null]
+  ];
+  fields.filter(([, value]) => value).forEach(([label, value]) => {
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const definition = document.createElement('dd');
+    definition.textContent = value;
+    details.append(term, definition);
+  });
+  if (job.company_links?.website_url) {
+    const link = fragment.querySelector('.website-link');
+    link.href = job.company_links.website_url;
+    link.hidden = false;
+  }
+  if (job.company_links?.linkedin_url) {
+    const link = fragment.querySelector('.linkedin-link');
+    link.href = job.company_links.linkedin_url;
+    link.hidden = false;
+  }
+  return fragment;
+};
+
+async function loadListings() {
+  listings.setAttribute('aria-busy', 'true');
+  try {
+    const response = await fetch('/api/pipeline/jobs');
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Could not load discovered jobs');
+    listings.replaceChildren();
+    if (!payload.jobs.length) return showMessage(listings, 'No jobs discovered yet. Run the discovery workflow to populate this list.');
+    payload.jobs.forEach((job) => listings.append(renderListing(job)));
+  } catch (error) {
+    showMessage(listings, error.message, 'error');
+  } finally {
+    listings.setAttribute('aria-busy', 'false');
   }
 }
 
@@ -125,6 +181,7 @@ async function loadUsage() {
   }
 }
 
-refreshButton.addEventListener('click', () => { loadQueue(); loadUsage(); });
+refreshButton.addEventListener('click', () => { loadQueue(); loadListings(); loadUsage(); });
 loadQueue();
+loadListings();
 loadUsage();

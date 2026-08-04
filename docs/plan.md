@@ -252,6 +252,36 @@ dashboard (`localhost:8080`), so the user doesn't have to check each provider's 
 **Out of scope:** historical usage graphs, alerting/thresholds, per-run cost attribution.
 Just current balance vs. plan limit, refreshed on dashboard load — a v1 read-only view.
 
+## New task block: full job-listings view with company profiles (2026-08-04)
+
+**Goal:** Show every job the pipeline has scraped and evaluated, not just the ones that reach
+human review — user's explicit ask, plus company profile (website/LinkedIn) on every listing.
+
+**Steps:**
+- [x] `worker/src/pipeline-store.mjs` — `list({status})`, most-recent-first, optional filter.
+- [x] `worker/src/server.mjs` — new `GET /api/pipeline/jobs` route, auth-gated, validates the
+      status filter.
+- [x] `worker/src/job-pipeline.mjs` — `companyLookup` moved earlier so it runs for every
+      live-verified job (skipped + daily-capped, not just accepted); `skipped`/`needs_review`
+      records now carry `title`/`location`/`company`/`company_links`; `daily_cap_reached` is
+      now persisted (previously vanished with zero trace) but excluded from the
+      pre-verification duplicate check so it stays retry-eligible; `unverified`/`expired`
+      records now carry the verification `error` message.
+- [x] `worker/public/` — new "All discovered jobs" section: title/source-url fallback, status
+      badge, company name, fit score/skip reason, clickable company website/LinkedIn buttons.
+- [x] Fixed a pre-existing CSS bug found while building this: `.button[hidden]` wasn't actually
+      hidden (`.button`'s `display: inline-flex` overrode the UA `[hidden]` default) — silently
+      affected the existing `.artifact-link` too, not just the new buttons.
+- [x] Tests: 5 new (pipeline-store list/filter, skipped-job company persistence,
+      daily_cap_reached persistence + retry-eligibility). 76/76 passing project-wide.
+- [x] Verified live in-browser: rendering checked against real + pre-existing data, CSS fix
+      confirmed via `getComputedStyle` before/after and a synthetic DOM injection.
+- [x] `docs/decisions.md`/`docs/changelog.md`/`docs/status.md` — logged.
+
+**Known limitation, not solved this pass:** `daily_cap_reached` jobs still pay for
+re-verification on every retry until they clear the cap — would need caching the verified job
+body across runs to fix properly; out of scope here.
+
 ## Out of scope (this block)
 
 - Founder/personal contact discovery, LinkedIn profile scraping, or outreach

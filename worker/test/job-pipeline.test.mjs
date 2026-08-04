@@ -87,7 +87,7 @@ test('does not call verifyFallback when the primary verification already succeed
   }
 });
 
-test('stops at the daily cap before spending resumeClassifier/companyLookup calls', async () => {
+test('stops at the daily cap before spending a resumeClassifier call, but still looks up and persists the company profile', async () => {
   const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
   const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
   const reviewStore = new ReviewStore(join(root, 'review.json'));
@@ -101,14 +101,78 @@ test('stops at the daily cap before spending resumeClassifier/companyLookup call
     verify: async () => verifiedJob,
     dailyCap: 0,
     resumeClassifier: async () => { resumeClassifierCalled = true; return { bucket_id: null }; },
-    companyLookup: async () => { companyLookupCalled = true; return { website_url: null, linkedin_url: null }; }
+    companyLookup: async () => { companyLookupCalled = true; return { website_url: 'https://acme.com', linkedin_url: null }; }
   });
 
   try {
     const result = await pipeline.process({ source_url: verifiedJob.source_url });
     assert.equal(result.stage, 'daily_cap_reached');
     assert.equal(resumeClassifierCalled, false);
-    assert.equal(companyLookupCalled, false);
+    assert.equal(companyLookupCalled, true);
+    assert.equal(result.record.status, 'daily_cap_reached');
+    assert.equal(result.record.company_links.website_url, 'https://acme.com');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a daily_cap_reached job is retried (not treated as a permanent duplicate) on the next process() call', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  let verifyCalls = 0;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => { verifyCalls += 1; return verifiedJob; },
+    dailyCap: 0
+  });
+
+  try {
+    const first = await pipeline.process({ source_url: verifiedJob.source_url });
+    assert.equal(first.stage, 'daily_cap_reached');
+    const second = await pipeline.process({ source_url: verifiedJob.source_url });
+    assert.equal(second.stage, 'daily_cap_reached');
+    assert.equal(verifyCalls, 2, 'daily_cap_reached must not be short-circuited as a permanent duplicate');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('skipped jobs are still persisted with title, company, and company profile for the listings view', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const skippedJob = {
+    liveness: 'live', provider: 'greenhouse', board_token: 'acme', source_url: 'https://boards.greenhouse.io/acme/jobs/999',
+    job: {
+      stable_id: 'greenhouse:acme:999', title: 'Senior Android Engineer', source_url: 'https://boards.greenhouse.io/acme/jobs/999',
+      location: 'US only', description_text: 'Senior Android engineer, 5 years of experience.'
+    }
+  };
+  let companyLookupCalled = false;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => skippedJob,
+    companyLookup: async () => { companyLookupCalled = true; return { website_url: 'https://acme.com', linkedin_url: 'https://www.linkedin.com/company/acme' }; }
+  });
+
+  try {
+    const result = await pipeline.process({ source_url: skippedJob.source_url });
+    assert.equal(result.stage, 'skipped');
+    assert.equal(companyLookupCalled, true);
+    assert.equal(result.record.title, 'Senior Android Engineer');
+    assert.equal(result.record.company, 'acme');
+    assert.equal(result.record.company_links.website_url, 'https://acme.com');
+
+    const listed = await pipelineStore.list({ status: 'skipped' });
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].title, 'Senior Android Engineer');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -179,6 +243,7 @@ test('persists a non-live verification outcome and never re-verifies that URL ag
     const first = await pipeline.process({ source_url: 'https://careers.example.com/jobs/dead-end' });
     assert.equal(first.stage, 'manual_review');
     assert.equal(first.record.status, 'unverified');
+    assert.equal(first.record.error, 'Firecrawl and Apify both failed.');
     assert.equal(verifyCalls, 1);
 
     const second = await pipeline.process({ source_url: 'https://careers.example.com/jobs/dead-end' });

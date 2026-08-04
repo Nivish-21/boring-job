@@ -15,11 +15,16 @@
           <h1>Review queue</h1>
           <p class="lede">Review evidence and drafts before a supervised next step.</p>
         </div>
-        <button class="button button-secondary" id="refresh" type="button">Refresh queue</button>
+        <button class="button button-secondary" id="refresh" type="button">Refresh</button>
       </header>
       <p class="notice">Approval records a decision only. This dashboard never submits an application or sends a message.</p>
       <section id="usage" class="usage" aria-live="polite" hidden></section>
       <section id="queue" class="queue" aria-live="polite" aria-busy="true"></section>
+      <header class="section-heading">
+        <h2>All discovered jobs</h2>
+        <p class="lede">Everything the pipeline has scraped and evaluated, including jobs filtered out before reaching review.</p>
+      </header>
+      <section id="listings" class="queue" aria-live="polite" aria-busy="true"></section>
     </main>
     <template id="item-template">
       <article class="review-item">
@@ -46,6 +51,24 @@
           <button class="button button-primary" data-action="approve" type="button">Approve</button>
           <button class="button button-secondary" data-action="regenerate" type="button">Regenerate</button>
           <button class="button button-danger" data-action="reject" type="button">Reject</button>
+        </div>
+      </article>
+    </template>
+    <template id="listing-template">
+      <article class="review-item">
+        <div class="item-heading">
+          <div>
+            <p class="item-meta"></p>
+            <h2></h2>
+          </div>
+          <span class="status"></span>
+        </div>
+        <p class="summary"></p>
+        <dl class="details"></dl>
+        <div class="actions">
+          <a class="button button-secondary source-link" target="_blank" rel="noreferrer">Open source</a>
+          <a class="button button-secondary website-link" target="_blank" rel="noreferrer" hidden>Company website</a>
+          <a class="button button-secondary linkedin-link" target="_blank" rel="noreferrer" hidden>Company LinkedIn</a>
         </div>
       </article>
     </template>

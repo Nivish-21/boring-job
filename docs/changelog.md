@@ -121,3 +121,45 @@ state. 71/71 tests passing project-wide.
 **Also decided this session:** keep the project on Node rather than migrating to Python/
 FastAPI — user is learning Python but agreed a rewrite of an already-built, tested, live-
 verified pipeline would be pure churn (see `docs/decisions.md`).
+
+## 2026-08-04 — Full job-listings view with company profiles, plus a third dedup bug and a CSS bug
+
+Added a complete "All discovered jobs" view to the dashboard, showing every job the pipeline
+has ever seen — not just the pending-review queue (see `docs/decisions.md`).
+
+**Added:**
+- `worker/src/pipeline-store.mjs` — `list({status})`, most-recent-first, optional filter.
+- `worker/src/server.mjs` — new `GET /api/pipeline/jobs` route, auth-gated, validates the
+  `status` filter against the known set of statuses.
+- `worker/public/` — new "All discovered jobs" section below the review queue: title (or
+  source URL fallback for unverified/expired), status badge, company name, fit score/skip
+  reason, and clickable "Company website"/"Company LinkedIn" buttons when available.
+
+**Changed:**
+- `worker/src/job-pipeline.mjs` — `companyLookup` now runs for every live-verified job
+  (skipped and daily-capped, not just accepted), and the `skipped`/`needs_review` store
+  records now carry `title`/`location`/`company`/`company_links`. `daily_cap_reached` is now
+  persisted too (previously vanished with zero trace, the same unpersisted-record bug already
+  fixed twice today for `manual_review`/`expired`) but is explicitly excluded from the
+  pre-verification duplicate check so it stays eligible for a later run instead of being
+  permanently lost. `unverified`/`expired` records now also carry the verification `error`
+  message so the listing has something to show.
+- `worker/public/styles.css` — fixed a real pre-existing bug: `.button[hidden]` was rendering
+  visible because `.button`'s explicit `display: inline-flex` overrode the browser's default
+  `[hidden] { display: none }` (author CSS always wins over the UA stylesheet regardless of
+  specificity). This silently affected the existing `.artifact-link` before this session too,
+  not just the two new company-link buttons added here. Confirmed via `getComputedStyle` in
+  the live dashboard before and after the fix.
+
+**Tests:** 5 new tests across `pipeline-store.test.mjs`, `job-pipeline.test.mjs`, and
+`server.test.mjs` (list/filter behavior, company-profile persistence on skipped jobs,
+daily_cap_reached persistence + retry-eligibility, the new route). 76/76 passing project-wide.
+
+**Verified live:** rebuilt and checked the dashboard in-browser against real (partly
+pre-existing, partly fresh) pipeline data; confirmed the CSS fix via `getComputedStyle` and a
+synthetic DOM injection showing the company-link buttons render correctly both hidden and
+visible.
+
+**Known limitation, not solved today:** a `daily_cap_reached` job still pays for
+re-verification on every retry until it clears the cap — avoiding that would mean caching the
+verified job body across runs, out of scope for this pass.

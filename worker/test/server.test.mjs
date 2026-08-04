@@ -119,6 +119,43 @@ test('runs the pipeline endpoint only through the injected safe pipeline', async
   }
 });
 
+test('lists pipeline jobs through the injected pipeline store, with status filtering', async () => {
+  const store = { list: async () => [] };
+  const jobs = [
+    { stable_id: 'greenhouse:acme:1', status: 'needs_review', title: 'Backend Engineer' },
+    { stable_id: 'greenhouse:acme:2', status: 'skipped', title: 'Senior Android Engineer' }
+  ];
+  const pipelineStore = { list: async ({ status } = {}) => jobs.filter((job) => !status || job.status === status) };
+  const server = await start({ store, pipelineStore, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const all = await call(server, { path: '/api/pipeline/jobs' });
+    assert.equal(all.status, 200);
+    assert.equal(all.body.jobs.length, 2);
+
+    const filtered = await call(server, { path: '/api/pipeline/jobs?status=skipped' });
+    assert.equal(filtered.status, 200);
+    assert.deepEqual(filtered.body.jobs.map((job) => job.stable_id), ['greenhouse:acme:2']);
+
+    const badFilter = await call(server, { path: '/api/pipeline/jobs?status=bogus' });
+    assert.equal(badFilter.status, 400);
+  } finally {
+    await close(server);
+  }
+});
+
+test('returns 503 from the pipeline jobs listing endpoint when no pipeline store is configured', async () => {
+  const store = { list: async () => [] };
+  const server = await start({ store, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const response = await call(server, { path: '/api/pipeline/jobs' });
+    assert.equal(response.status, 503);
+  } finally {
+    await close(server);
+  }
+});
+
 test('runs the discovery endpoint only through the injected discovery runner', async () => {
   const store = { list: async () => [] };
   let runCalled = false;

@@ -21,6 +21,12 @@ export class PipelineStore {
     const state = await this.#read();
     return state.jobs.filter((job) => job.status === 'needs_review' && job.created_at >= isoString).length;
   }
+  async list({ status } = {}) {
+    const state = await this.#read();
+    return state.jobs
+      .filter((job) => !status || job.status === status)
+      .sort((left, right) => right.created_at.localeCompare(left.created_at));
+  }
   async record(record) {
     return this.#mutate((state) => {
       const existing = state.jobs.find((job) => job.stable_id === record.stable_id);
