@@ -4,23 +4,25 @@ _Last updated: 2026-08-04_
 
 ## Current state
 
-Building the automated daily job discovery pipeline (full spec in `docs/plan.md`). All
-worker-side code is written and tested — 61/61 tests passing (`npm test` in `worker/`).
-Live-smoke-tested `startWorker()`: boots clean with a missing resume dir, `/health` responds,
-`/api/discovery/run` fails cleanly (not a crash) with no Firecrawl key configured.
+The automated daily job discovery pipeline (full spec in `docs/plan.md`) is fully built:
+all worker-side code, `compose.yml` (resume bind-mount + env passthrough), and the n8n
+scheduled workflow. 61/61 tests passing (`npm test` in `worker/`); `docker compose config
+--quiet` validates clean. Current state committed and pushed to `origin/main` (`3031cba`),
+verified via `git ls-remote` matching local `git rev-parse main`.
 
-Nothing has been deployed or run end-to-end against real job postings yet.
+Nothing has been deployed or run end-to-end against real job postings yet — that's the only
+remaining step, and it's blocked on credentials (see below).
 
 ## Active plan
 
-`docs/plan.md` — "Automated daily job discovery pipeline". Steps 1–10 (all `worker/src/*`
-modules) are done. Remaining, in order:
+`docs/plan.md` — "Automated daily job discovery pipeline". All build steps are done. Only
+remaining:
 
-1. `compose.yml` — resume bind-mount (read-only) + env passthrough for the new keys.
-2. `workflows/scheduled-job-discovery.json` — n8n Cron -> `POST /api/discovery/run`.
-3. Confirm `OPENAI_API_KEY` / `APIFY_API_TOKEN` in `.env` — **user said they'll supply these.**
-   `FIRECRAWL_API_KEY` is already present from an earlier session.
-4. End-to-end run against real discovered postings; confirm the review dashboard shows fit
+1. User supplies `OPENAI_API_KEY` and `APIFY_API_TOKEN`. No local `.env` file exists yet at
+   all — needs to be created from `.env.example`. `FIRECRAWL_API_KEY` also needed; the key
+   used for the earlier live-verification session was redacted from `docs/plan.md` and should
+   be rotated, not reused.
+2. End-to-end run against real discovered postings; confirm the review dashboard shows fit
    score, resume attachment (or no-match), and company metadata correctly.
 
 ## Major decisions
@@ -42,6 +44,10 @@ See `docs/decisions.md` for full reasoning. Summary:
   `unauthorized`/`quota_exhausted` indefinite (no auto-retry on a confirmed quota exhaustion).
 - `DiscoveryRunner`'s search `limit` defaults to `dailyCap * 2` — headroom since not every
   discovered URL survives verification + evaluation.
+- `compose.yml`'s resume bind mount source is `${RESUME_HOST_DIR:-/Users/nivish/Desktop/Nivish_Tailored_Resumes}`
+  — overridable via `.env`, defaults to the path already in use.
+- Found and redacted a real Firecrawl session key that had been left in plaintext in
+  `docs/plan.md` from an earlier session, before pushing — flagged to the user to rotate it.
 
 ## Known issues / open risks
 
@@ -54,8 +60,14 @@ See `docs/decisions.md` for full reasoning. Summary:
 - Free-tier quotas (Firecrawl, Apify) are finite; the circuit breaker exists but its real-world
   behavior under actual quota exhaustion is untested (only unit-tested with injected fetch
   mocks).
+- `/api/discovery/run` is gated by the same Basic Auth as every other worker route once
+  `REVIEW_AUTH_USER`/`REVIEW_AUTH_PASSWORD` are set — the n8n workflow's HTTP Request node
+  needs that credential attached or the scheduled run will 401 (documented in
+  `workflows/README.md`).
 
 ## Next steps
 
-Pick up at `docs/plan.md`'s "Resume point" section — `compose.yml`, then the n8n workflow
-file, then credentials, then the end-to-end run.
+Waiting on the user to supply `OPENAI_API_KEY`, `APIFY_API_TOKEN`, and a fresh
+`FIRECRAWL_API_KEY` in a local `.env` (copy from `.env.example`). Once supplied: `docker
+compose up -d --build`, then either trigger `POST /api/discovery/run` directly or activate
+`workflows/scheduled-job-discovery.json` in n8n, and verify the review dashboard output.

@@ -151,65 +151,57 @@ n8n Cron (daily)
       doesn't crash), `/health` responds 200, `/api/discovery/run` returns a
       clean 400 (not a crash) with no Firecrawl key configured. Tested
       (3 new tests in `test/server.test.mjs`, 61 passing project-wide).
-- [ ] Tests for every new module (node:test + node:assert/strict, injectable
+- [x] Tests for every new module (node:test + node:assert/strict, injectable
       `fetchImpl`, `mkdtemp` for store isolation — exactly like the existing
-      `job-verifier.test.mjs`/`job-pipeline.test.mjs` pattern). Run `npm
-      test` in `worker/` after each module and after final integration.
-- [ ] `compose.yml`: add read-only bind mount
-      `~/Desktop/Nivish_Tailored_Resumes:/app/resumes:ro` on the `worker`
+      `job-verifier.test.mjs`/`job-pipeline.test.mjs` pattern). 61/61 passing
+      (`npm test` in `worker/`).
+- [x] `compose.yml`: read-only bind mount (`RESUME_HOST_DIR`, defaults to
+      `~/Desktop/Nivish_Tailored_Resumes`) `:/app/resumes:ro` on the `worker`
       service, plus env passthrough for `OPENAI_API_KEY`, `FIRECRAWL_API_KEY`,
       `APIFY_API_TOKEN`, `RESUME_DIR`, `DISCOVERY_QUERY`, `DAILY_LEAD_CAP`,
       `APIFY_ACTOR_ID` (all `${VAR:-}` optional passthrough from `.env`).
-- [ ] n8n workflow: new `workflows/scheduled-job-discovery.json` — Cron
-      trigger (daily) -> HTTP POST `http://worker:8080/api/discovery/run` ->
+      Validated with `docker compose config --quiet` (exit 0).
+- [x] n8n workflow: `workflows/scheduled-job-discovery.json` — Schedule
+      Trigger (daily) -> HTTP POST `http://worker:8080/api/discovery/run` ->
       done. Orchestration logic lives in the worker (testable code), n8n
       stays a thin scheduler per the user's own stated preference and
-      `PLAN.md`'s architecture ("n8n: schedules... Worker: adapters...").
+      `PLAN.md`'s architecture ("n8n: schedules... Worker: adapters..."). Usage
+      documented in `workflows/README.md`, including the Basic Auth caveat
+      when `REVIEW_AUTH_USER`/`REVIEW_AUTH_PASSWORD` are set.
 - [ ] Credentials: confirm `OPENAI_API_KEY`, `FIRECRAWL_API_KEY`,
       `APIFY_API_TOKEN` are in `.env` (FIRECRAWL_API_KEY was used for the
       live API verification above — key value redacted, rotate before
-      reuse). OpenAI/Apify keys still needed from the user.
-- [ ] docs/decisions.md: log (1) Firecrawl `/scrape`+OpenAI over `/extract`
+      reuse). **Blocked — OpenAI/Apify keys still needed from the user; no
+      `.env` file exists locally yet.**
+- [x] docs/decisions.md: log (1) Firecrawl `/scrape`+OpenAI over `/extract`
       for cost, (2) Apify scoped to scrape-fallback only, actor choice
       `apify~website-content-crawler` unconfirmed by user, (3) circuit
       breaker as local JSON file store (matches existing pattern) rather
       than the unused Postgres container.
-- [ ] docs/changelog.md + docs/status.md: update once the build is complete
-      and tests pass.
+- [x] docs/changelog.md + docs/status.md: updated.
 - [ ] Run end-to-end against a handful of real discovered postings, confirm
       review dashboard shows fit score, resume attachment (or no-match), and
-      company metadata correctly.
+      company metadata correctly. **Blocked on credentials above.**
 
-## Resume point (context was at 81%+ when this was last updated)
+## Resume point (updated 2026-08-04, second pass)
 
-All worker code is now built and tested: `firecrawl-client.mjs`,
-`apify-client.mjs`, `provider-state-store.mjs`, `resume-catalog.mjs`,
-`company-lookup.mjs`, `fit-evaluator.mjs`, `job-discovery.mjs`,
-`pipeline-store.mjs` (countCreatedSince), `job-pipeline.mjs` (extended,
-backward-compatible), `server.mjs` (wired + smoke-tested). 61/61 tests
-passing (`npm test` in `worker/`).
+All worker code, `compose.yml`, and the n8n workflow are now built and tested.
+Current state pushed to `origin/main` (`3031cba`). 61/61 tests passing
+(`npm test` in `worker/`); `docker compose config --quiet` validates clean.
 
-Remaining steps, in order:
-1. `compose.yml` — add the read-only resume bind mount and env passthrough
-   for `OPENAI_API_KEY`, `FIRECRAWL_API_KEY`, `APIFY_API_TOKEN`,
-   `RESUME_DIR`, `DISCOVERY_QUERY`, `DAILY_LEAD_CAP`, `APIFY_ACTOR_ID`.
-2. `workflows/scheduled-job-discovery.json` — n8n Cron -> HTTP POST
-   `http://worker:8080/api/discovery/run`.
-3. Confirm `OPENAI_API_KEY`/`APIFY_API_TOKEN` are in `.env` — user said
-   ("i will provide the keys") they'll supply these; `FIRECRAWL_API_KEY`
-   already present from an earlier session.
-4. `docs/decisions.md` — log the 3 decisions listed below (this file didn't
-   exist before this block; create it).
-5. `docs/changelog.md` + `docs/status.md` — create and update once the
-   build is complete and tests pass (neither file existed before this
-   block either).
-6. End-to-end run against real discovered postings, confirm the review
-   dashboard shows fit score, resume attachment (or no-match), and company
-   metadata correctly.
+Remaining, in order — both blocked on the same missing credentials:
+1. User supplies `OPENAI_API_KEY` and `APIFY_API_TOKEN` (create a local
+   `.env` from `.env.example` — no `.env` file exists yet at all).
+   `FIRECRAWL_API_KEY` still needed too (the earlier session's key was
+   redacted from this doc and should be rotated, not reused).
+2. End-to-end run against real discovered postings once keys are supplied:
+   `docker compose up -d --build`, import `scheduled-job-discovery.json` (or
+   trigger `POST /api/discovery/run` directly), confirm the review dashboard
+   shows fit score, resume attachment (or no-match), and company metadata
+   correctly.
 
-No further design decisions needed for steps 1-2 — everything downstream is
-already fully specified above. Read this file at the start of the next turn
-instead of re-deriving the architecture.
+No further design or build work is needed before that run — everything
+downstream is already fully specified and implemented above.
 
 ## Risks
 

@@ -54,3 +54,14 @@ points. Also smoke-tested `startWorker()` live: boots clean with a missing resum
 passthrough, `workflows/scheduled-job-discovery.json` n8n Cron trigger, `OPENAI_API_KEY`/
 `APIFY_API_TOKEN` in `.env` (user to supply), and an end-to-end run against real discovered
 postings.
+
+## 2026-08-04 — Pushed pipeline build to GitHub
+
+Committed and pushed the full job-discovery pipeline build above to `origin/main`
+(`3031cba`). Before committing, redacted a real Firecrawl session key
+(`fc-823d2...`, already used for a live API verification during the build) that had
+been left in plaintext in `docs/plan.md`. Repo is private, but rotate that key before
+reuse regardless — it was live-tested in a prior turn.
+
+**Verification:** `git rev-parse main` matched `git ls-remote origin main` post-push
+(per lessons: never trust push exit status/output alone).

@@ -25,9 +25,17 @@ services:
       REVIEW_DATA_DIR: /app/data
       REVIEW_AUTH_USER: ${REVIEW_AUTH_USER:-}
       REVIEW_AUTH_PASSWORD: ${REVIEW_AUTH_PASSWORD:-}
+      RESUME_DIR: /app/resumes
+      DISCOVERY_QUERY: ${DISCOVERY_QUERY:-}
+      DAILY_LEAD_CAP: ${DAILY_LEAD_CAP:-}
+      APIFY_ACTOR_ID: ${APIFY_ACTOR_ID:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      APIFY_API_TOKEN: ${APIFY_API_TOKEN:-}
     volumes:
       - ./data/artifacts:/app/artifacts
       - ./data/review:/app/data
+      - ${RESUME_HOST_DIR:-/Users/nivish/Desktop/Nivish_Tailored_Resumes}:/app/resumes:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 5s
