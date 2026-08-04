@@ -525,31 +525,71 @@ pause request).** 3 of 7 build steps done. Built and NOT yet tested:
         `process.env` inside the module) — matches this project's "no implicit/magic values
         inside a module, wire keys in from `startWorker()`" pattern used everywhere else.
 
+**Done, step 4 (2026-08-04, fourth pass):**
+- [x] `worker/src/server.mjs`: refactored `readJson` to share a new size-capped `readBody`
+      helper with a sibling `readText` (raw string, non-empty check) — existing JSON-route
+      behaviour unchanged, confirmed by the full 85/85 suite still passing. New route
+      `POST /api/founders/import` (`content-type: text/csv`): `parseConnectionsCsv` →
+      `filterFounders` → `founderOutreachRunner.run()` → `{ok, result}`; 503 when unwired,
+      mirrors `discoveryRunner`'s pattern. `startWorker()` now constructs `FounderStore` +
+      `FounderOutreachRunner`, reusing the same `pipeline`/`resumeBuckets`/`firecrawlApiKey`
+      instances already built for job discovery — no new env vars needed. Caught and fixed one
+      real bug before it shipped: a shorthand `lookupCompany` in the runner construction
+      resolved to the *raw* imported function (no API key baked in) instead of the wrapped
+      `companyLookup` closure `pipeline` already uses — fixed to `lookupCompany: companyLookup`.
+      Verified live (not just unit-level): a 503 smoke test with no runner wired, and a full
+      in-process CSV→parse→filter→runner→review-item round trip with injected fakes, both via
+      real HTTP requests against `createApp()`.
+
+**Done, step 5 (2026-08-04, fifth pass):**
+- [x] `worker/public/app.js`: `buildCards()` now appends a second pass — any review item not
+      referenced by a pipeline job's `review_item_id` renders as its own read-only-except-
+      actions card. Added a `.kind` badge (Job / Founder outreach) next to the status badge in
+      both the template (`index.html`) and CSS (`styles.css`, `.kind`/`.kind-founder`/
+      `.badges`). Added `formatDateIst` (explicit `timeZone: 'Asia/Kolkata'`) and a
+      `formatCardDate(card, value)` dispatcher so founder cards show IST specifically while job
+      cards stay on browser-local, unchanged. Company filter parity for founder cards: derived
+      from the review item's title (`"<name> — <company>"`, same separator
+      `founder-outreach.mjs` already uses) rather than a new store field, since `ReviewStore`'s
+      schema has no dedicated company column and changing it was out of scope for this step.
+      Verified live (not just code review): ran the worker locally against seeded
+      `pipeline-jobs.json`/`review-items.json` (one job item, one founder item, both `pending`)
+      and drove the real dashboard in-browser — confirmed both badges render, the founder card's
+      "Discovered"/"Expires" times resolve to IST (`04:30Z` → `10:00 am`, consistent with the
+      explicit `Asia/Kolkata` formatter, not incidentally matching browser-local), the company
+      filter narrows to just the founder card on "Nimbus", and zero console errors. Full 85/85
+      backend test suite still passes (no backend files touched this step).
+
 **Not started yet (in order):**
-- [ ] `worker/src/server.mjs`: construct `FounderStore`, wire a `FounderOutreachRunner` in
-      `startWorker()` (needs `openaiApiKey` passed through, which no other runner currently
-      takes directly — check whether `classifyResumeBucket`'s existing `openaiApiKey` var can
-      just be reused). New route `POST /api/founders/import` — raw CSV body
-      (`content-type: text/csv`, NOT JSON — note `readJson`/`maxBodyBytes` in `server.mjs` is
-      JSON-only today, so this route needs its own raw-body reader, capped the same way).
-      Route: parse via `parseConnectionsCsv` → `filterFounders` → `founderOutreachRunner.run()`
-      → return `{ok, result}`. Auth-gated like every other route (already automatic — only
-      `/health` is excluded from `isAuthorized`).
-- [ ] `worker/public/app.js` dashboard gap: `buildCards()` only iterates `pipelineJobs` and
-      looks up a review item via `job.review_item_id`. A `kind: 'founder'` review item has NO
-      pipeline-job counterpart, so add a second pass appending any review item not already
-      referenced by a pipeline job's `review_item_id` as its own card. Add a Founder/Job badge.
-      IST-format founder card timestamps specifically (`Intl.DateTimeFormat('en-IN', {timeZone:
-      'Asia/Kolkata', ...})`), leave job cards on browser-local as-is.
-- [ ] Tests: `connections-catalog.test.mjs`, `founder-store.test.mjs`,
-      `founder-outreach.test.mjs` (mock `fetchImpl`/injected collaborators, same pattern as
-      `company-lookup.test.mjs`/`fit-evaluator.test.mjs`/`job-discovery.test.mjs`), plus a
-      `server.test.mjs` case for the new route. Run full `npm test` in `worker/`, confirm no
-      regressions against the current 85 passing.
-- [ ] `docs/decisions.md`: log the deviations above (single-LLM-call company summary+draft;
-      ATS-priority URL sort in `findCareersUrl`; always-create-review-item-even-on-draft-
-      failure). `docs/changelog.md` + `docs/status.md`: update once the full feature is tested
-      end-to-end (not yet — do not mark done prematurely).
+**Done, step 6 (2026-08-04, sixth pass):**
+- [x] `worker/test/connections-catalog.test.mjs` (6 tests): header-preamble scan, quoted-comma
+      cell, malformed-CSV throw, `isFounderTitle` positive/negative cases, `filterFounders`.
+- [x] `worker/test/founder-store.test.mjs` (3 tests): upsert-by-`profile_url` merge semantics,
+      null on unknown URL, most-recent-first `list()` — mirrors `pipeline-store.test.mjs`.
+- [x] `worker/test/founder-outreach.test.mjs` (14 tests): `findCareersUrl` (ATS-priority sort,
+      site-scoped query, degrade-to-`[]` on failure/no company), `draftOutreachMessage` (happy
+      path + all four degrade paths, mirrors `fit-evaluator.test.mjs`), `FounderOutreachRunner
+      .run()` (invalid `profile_url` skip, duplicate skip, cap stop, stops at first
+      `needs_review` pipeline hit, always creates a review item + records the founder even when
+      drafting fails).
+- [x] `worker/test/server.test.mjs`: 2 new cases for `POST /api/founders/import` (runs through
+      the injected runner and parses the CSV correctly; 503 when unwired).
+- [x] Full suite: **109/109 passing** (85 previous + 24 new), zero regressions.
+
+**Done, step 7 (2026-08-04, seventh and final pass):**
+- [x] `docs/decisions.md` — logged the four implementation deviations from this sketch as their
+      own dated entry ("Founder-outreach implementation deviations from the original design
+      sketch").
+- [x] `docs/changelog.md` — logged as one entry ("Founder-outreach feature (LinkedIn
+      connections → drafted outreach)").
+- [x] `docs/status.md` — "Current state" and "Active plan" rewritten to reflect the feature as
+      built-and-tested-but-not-yet-run-live; stale "not built yet" dashboard-gap note removed
+      from "Known issues"; "Next steps" now leads with the real LinkedIn CSV import, not more
+      building.
+
+**Feature build complete.** All 7 steps done, 109/109 tests passing. What's left is a live run
+against real data (LinkedIn CSV export + `POST /api/founders/import`), not more code — see
+`docs/status.md`'s "Active plan" section for the exact next actions.
 
 **Do not re-derive the design above — read it, then continue directly from `server.mjs` wiring.**
 No new architectural decisions needed; this is mechanical continuation of an already-approved,

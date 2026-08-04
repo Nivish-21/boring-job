@@ -283,3 +283,48 @@ single remaining service.
 **Also done:** stopped and removed the `boring-job-n8n-1`/`boring-job-postgres-1` containers.
 Left `data/n8n`/`data/postgres` on disk per the user's choice (reversible later without redoing
 n8n's owner-account setup).
+
+## 2026-08-04 — Founder-outreach feature (LinkedIn connections → drafted outreach)
+
+Full design in `docs/plan.md` under "New task block: founder outreach from LinkedIn
+connections". Built across several passes in one session (context-budget checkpoints logged
+along the way in `docs/plan.md`/`docs/status.md`, not separate sessions). Identifies founders
+among the user's LinkedIn connections (via an official, ToS-safe CSV export — no scraping of a
+logged-in session), researches each founder's company, checks for a real open role through the
+**unmodified** `JobPipeline`, and drafts a personalized outreach message for human review. Never
+auto-sends.
+
+**Added:**
+- `worker/src/connections-catalog.mjs` — `parseConnectionsCsv` (scans past LinkedIn's `Notes:`
+  preamble to the real header row, hand-rolled quoted-CSV-cell splitter), `isFounderTitle`,
+  `filterFounders`.
+- `worker/src/founder-store.mjs` — `FounderStore`, atomic-JSON store keyed by `profile_url` (same
+  pattern as `pipeline-store.mjs`), so an already-researched founder is never re-processed.
+- `worker/src/founder-outreach.mjs` — `findCareersUrl` (ATS-board-biased Firecrawl search, sorted
+  so free-to-verify Greenhouse/Lever/Ashby URLs come first), `draftOutreachMessage` (OpenAI call
+  shaped like `classifyResumeBucket`, degrades to `{message: null, reason}` on any failure),
+  `FounderOutreachRunner` (per-founder: look up company → find careers URLs → run candidates
+  through the unmodified pipeline, stop at the first real open role → draft the message →
+  **always** create a review item, even when drafting fails, and always record the founder).
+- `worker/src/server.mjs` — new route `POST /api/founders/import` (raw `text/csv` body, not
+  JSON — added a `readText` sibling to the existing `readJson` body reader); `startWorker()` now
+  constructs `FounderStore` + `FounderOutreachRunner`, reusing the same `pipeline`/
+  `resumeBuckets`/`firecrawlApiKey` instances already built for job discovery.
+- `worker/public/app.js`/`index.html`/`styles.css` — dashboard now renders `kind: 'founder'`
+  review items (previously invisible — they have no pipeline-job counterpart), with a Job/Founder
+  outreach badge and IST-specific timestamps for founder cards (job cards stay browser-local).
+- Tests: `connections-catalog.test.mjs` (6), `founder-store.test.mjs` (3),
+  `founder-outreach.test.mjs` (14), plus 2 new cases in `server.test.mjs` — 24 new tests.
+
+**Verified live (not just unit tests):** an in-process HTTP round trip of the full CSV → parse →
+filter → runner → review-item path against `createApp()`; a dashboard smoke test against seeded
+`pipeline-jobs.json`/`review-items.json` data (one job card, one founder card) confirming the
+badge, IST timestamp, evidence links, and company filter all render/behave correctly with zero
+console errors.
+
+**Tests:** 109/109 passing project-wide (85 previous + 24 new), zero regressions.
+
+**Not yet done:** a live end-to-end run against a real LinkedIn CSV export and real
+Firecrawl/OpenAI calls — blocked on the user supplying the CSV (and, optionally, confirming
+`OPENAI_API_KEY`, still not supplied project-wide). See `docs/decisions.md` for the
+implementation deviations made from the original design sketch.

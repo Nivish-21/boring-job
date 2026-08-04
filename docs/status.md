@@ -13,34 +13,42 @@ each card showing an explicit "Discovered" timestamp and colour-coded fit score)
 job ever seen, plus a Firecrawl/Apify usage strip. Discovery targets ATS-hosted boards directly
 (Greenhouse/Lever/Ashby). Packet drafts include a capped excerpt of the matched resume's real
 extracted text (kept outside git, in `~/Desktop/Nivish_Tailored_Resumes/reference/`).
-`OPENAI_API_KEY` still not supplied — resume classification degrades to `null` as designed,
-everything else works. 85/85 tests passing; `docker compose config --quiet` validates clean.
+A **founder-outreach feature** is now built and unit-tested on top of this: imports a LinkedIn
+connections CSV (official export, no scraping), identifies founders, researches their companies,
+checks for a real open role through the unmodified job pipeline, and drafts a personalized
+outreach message for human review — never auto-sends. Not yet run against real data (see "Active
+plan" below). `OPENAI_API_KEY` still not supplied — resume classification and founder-outreach
+message drafting both degrade to `null`/no-draft as designed, everything else works. 109/109
+tests passing; `docker compose config --quiet` validates clean.
 
-## Active plan — MID-BUILD, resume here next session (context-budget checkpoint, not a user pause)
+## Active plan — founder-outreach feature: built and unit-tested, not yet run against real data
 
-Building the **founder-outreach feature** (docs/plan.md, last task block, "Resume point (2026-08-04,
-third pass)"). 3 of 7 steps done and written to disk, untested: `worker/src/connections-catalog.mjs`,
-`worker/src/founder-store.mjs`, `worker/src/founder-outreach.mjs`. Read the "Resume point" note in
-docs/plan.md — it documents a few implementation deviations from the original sketch (single
-combined LLM call for company-summary+draft instead of two, ATS-priority URL sort, review item
-always created even when drafting fails) that still need logging to docs/decisions.md.
+All 7 build steps in `docs/plan.md` are complete: `connections-catalog.mjs` (CSV parsing),
+`founder-store.mjs`, `founder-outreach.mjs` (careers-URL discovery + OpenAI drafting, reusing the
+unmodified `JobPipeline`), `server.mjs` wiring (`POST /api/founders/import`), the dashboard gap
+close (`kind: 'founder'` review items now render with a Job/Founder badge and IST timestamps),
+and a full test suite (24 new tests). **109/109 tests passing project-wide.** Implementation
+deviations from the original design sketch are logged in `docs/decisions.md`
+("Founder-outreach implementation deviations").
 
-**Not started yet, in order:** wire `FounderStore`/`FounderOutreachRunner` into `server.mjs` +
-new `POST /api/founders/import` route (raw CSV body, not JSON — server.mjs's `readJson` is
-JSON-only today, this route needs its own raw-body reader); close the dashboard gap in
-`worker/public/app.js` (`kind: 'founder'` review items have no pipeline-job counterpart, so
-`buildCards()` never surfaces them today); tests for all three new modules + the new route;
-`docs/decisions.md`/`changelog.md`/`status.md` once tested end-to-end. Full detail, including
-exact function signatures already built, is in `docs/plan.md` — do not re-derive.
+**What's actually left is a live run, not more building:**
+1. User exports LinkedIn connections via Settings & Privacy → "Get a copy of your data" →
+   Connections (a CSV — no scraping, no credentials shared, matches the ToS-safety decision
+   already made for this feature).
+2. `POST /api/founders/import` with that CSV as the raw body (`content-type: text/csv`) against
+   a running worker.
+3. Confirm in the dashboard: founders get identified, company research happens, any real open
+   role gets found through the normal job pipeline, and a message gets drafted (or, if
+   `OPENAI_API_KEY` still isn't supplied, confirm the review item still appears with `draft: null`
+   and a clear reason — this is the designed degrade path, not a bug).
 
 **Explicit instruction for next session: do not open by asking for the LinkedIn connections
-CSV.** The user was clear about this. Resume building from the design in `docs/plan.md`; the
-CSV/file question only comes up once the code is actually ready to run end-to-end against real
-data.
+CSV unprompted.** It's fine to ask now that the code is actually ready to run against it — this
+instruction was about not asking before the code existed, which is no longer the case.
 
-Once founder-outreach is built: `DISCOVERY_SCHEDULE_ENABLED` is still off by default for the
-existing job-discovery pipeline — turn on when the user wants real unattended daily runs.
-`OPENAI_API_KEY` is still not supplied (optional, resume-bucket auto-suggestion only).
+`DISCOVERY_SCHEDULE_ENABLED` is still off by default for the existing job-discovery pipeline —
+turn on when the user wants real unattended daily runs. `OPENAI_API_KEY` is still not supplied
+(optional — resume-bucket auto-suggestion and founder-outreach message drafting both need it).
 
 ## Major decisions
 
@@ -77,6 +85,9 @@ See `docs/decisions.md` for full reasoning. Summary:
   Instead: user exports connections via LinkedIn's own official data-export tool, worker parses
   that CSV locally. Reuses `company-lookup.mjs` for company research and the existing
   `JobPipeline.process()` unmodified to check for real open roles at each founder's company.
+  Built and unit-tested 2026-08-04 — implementation deviations from the original design sketch
+  (single combined LLM call, ATS-priority URL sort, always-create-review-item-on-draft-failure,
+  title-derived company filter) are logged in `docs/decisions.md`.
 
 ## Minor decisions
 
@@ -109,14 +120,16 @@ See `docs/decisions.md` for full reasoning. Summary:
   dashboard edit needs an image rebuild to take effect.
 - Company-profile lookup running on every live-verified job roughly doubles Firecrawl search
   volume for that step — cheap per call, worth watching via the usage strip.
-- Founder-outreach dashboard rendering isn't built yet: `app.js`'s `buildCards()` only iterates
-  pipeline jobs today, so a `kind: 'founder'` review item (no matching pipeline job) won't
-  surface in the unified list until that's added (see the plan block's "dashboard gap to close").
+- Founder-outreach has never been run against real data — only unit-tested with injected fakes
+  and a live dashboard smoke test against seeded local JSON. First real CSV import may surface
+  behaviour the unit tests didn't anticipate (see "Active plan" above for the exact next steps).
 
 ## Next steps
 
-1. **Build founder-outreach feature** — full design already written in `docs/plan.md`. Do not
-   ask for the LinkedIn CSV at session start; just start implementing.
+1. **Run founder-outreach against real data** — user exports their LinkedIn connections CSV,
+   imports it via `POST /api/founders/import`, confirm the dashboard shows what's expected. See
+   "Active plan" above for the exact checklist.
 2. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
    the user wants that (currently off; manual trigger via `POST /api/discovery/run` still works).
-3. User supplies `OPENAI_API_KEY` when ready (optional, resume-bucket auto-suggestion only).
+3. User supplies `OPENAI_API_KEY` when ready (optional — powers resume-bucket auto-suggestion
+   and founder-outreach message drafting).

@@ -184,6 +184,56 @@ test('returns 503 from the discovery endpoint when no discovery runner is config
   }
 });
 
+test('runs the founder-import endpoint only through the injected founder outreach runner', async () => {
+  const store = { list: async () => [] };
+  let receivedFounders = null;
+  const founderOutreachRunner = { run: async (founders) => { receivedFounders = founders; return { processed: 1, stage_counts: { processed: 1 } }; } };
+  const server = await start({ store, founderOutreachRunner, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const address = server.address();
+    const csv = 'First Name,Last Name,URL,Email Address,Company,Position,Connected On\nJane,Doe,https://www.linkedin.com/in/janedoe,jane@x.com,Acme,Co-Founder,01 Jan 2026\nJohn,Smith,https://www.linkedin.com/in/johnsmith,,Acme,Engineer,02 Jan 2026\n';
+    const response = await new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: address.port, method: 'POST', path: '/api/founders/import', headers: { 'content-type': 'text/csv' } }, (res) => {
+        let raw = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => { raw += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(raw) }));
+      });
+      req.on('error', reject);
+      req.end(csv);
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { ok: true, result: { processed: 1, stage_counts: { processed: 1 } } });
+    assert.equal(receivedFounders.length, 1);
+    assert.equal(receivedFounders[0].first_name, 'Jane');
+  } finally {
+    await close(server);
+  }
+});
+
+test('returns 503 from the founder-import endpoint when no founder outreach runner is configured', async () => {
+  const store = { list: async () => [] };
+  const server = await start({ store, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const address = server.address();
+    const response = await new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: address.port, method: 'POST', path: '/api/founders/import', headers: { 'content-type': 'text/csv' } }, (res) => {
+        let raw = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => { raw += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(raw) }));
+      });
+      req.on('error', reject);
+      req.end('First Name,Last Name,URL,Email Address,Company,Position,Connected On\nJane,Doe,https://www.linkedin.com/in/jane,,Acme,Founder,01 Jan 2026\n');
+    });
+    assert.equal(response.status, 503);
+  } finally {
+    await close(server);
+  }
+});
+
 test('returns firecrawl/apify usage errors without either key configured, with no network call', async () => {
   const store = { list: async () => [] };
   const server = await start({ store, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });

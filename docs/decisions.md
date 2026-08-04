@@ -291,3 +291,48 @@ up later (e.g. notifying on new `needs_review` items across multiple channels), 
 then would be earning its keep rather than serving as a wrapper around code that already runs
 itself. `data/n8n` and `data/postgres` were left on disk (not deleted) at the user's explicit
 choice, so this remains reversible without redoing the n8n owner-account setup.
+
+## 2026-08-04 — Founder-outreach implementation deviations from the original design sketch
+
+**Context:** The founder-outreach feature (`docs/plan.md`) was approved at a design level
+before being built. A few implementation choices made while actually writing the code diverge
+from that sketch in ways worth recording, since the sketch is what a future session would
+otherwise treat as the source of truth.
+
+**Decision 1 — one combined LLM call for company-summary-and-draft, not two.** The sketch
+described a step that "scrapes the company site, has the LLM summarize what they do, and drafts
+a specific value-add angle" — read as two LLM calls (summarize, then draft) chained together.
+Built instead as a single Firecrawl scrape (capped 2,000 chars, degrades to `null` on any
+failure) fed as raw context into one `draftOutreachMessage` OpenAI call that does both in one
+prompt. **Reasoning:** keeps the shape identical to `fit-evaluator.mjs`'s existing single-call
+pattern, and halves the OpenAI cost per founder — a stated cost-consciousness in this project
+(see the credit-usage-tracking and cost-scoping entries above) that a second, independent LLM
+step would have worked against for a small, capped context.
+
+**Decision 2 — `findCareersUrl` sorts ATS-board URLs before generic ones.** Firecrawl search
+results are deduped and then re-ordered so Greenhouse/Lever/Ashby URLs come first, since those
+verify for free and are guaranteed a single posting (same reasoning as the discovery-query
+retargeting decision above). A generic company-site careers URL is still returned and still
+tried (through the unmodified `verifyFallback` scrape path), just after the free-to-verify
+candidates.
+
+**Decision 3 — a `ReviewStore` item is always created, even when message drafting fails.** If
+`OPENAI_API_KEY` is missing or the OpenAI call otherwise fails, `draftOutreachMessage` returns
+`{message: null, reason}`. Rather than skip creating a review item for that founder,
+`FounderOutreachRunner` always creates one (`draft: null`, the failure reason folded into
+`summary`) and always marks the founder processed. **Reasoning:** matches this project's
+standing "persist every outcome, never silently drop one" rule (see the dedupe-before-
+verification decision above) — a founder with a found company/role but no drafted message is
+still useful information for the human reviewer, and hiding it would make the missing-API-key
+state invisible in the dashboard instead of visibly waiting there.
+
+**Decision 4 — founder-card company filtering derives the company name from the review item's
+title, not a new store field.** `ReviewStore`'s schema (`review-store.mjs`) has no dedicated
+company column, and adding one was out of scope for the dashboard-gap step. Since
+`founder-outreach.mjs` already builds review titles as `"<name> — <company>"`, the dashboard
+(`app.js`) splits on that same separator to recover the company text for its existing company
+search filter, rather than changing the store schema.
+
+**Verification:** all four choices are exercised by the test suite added alongside them
+(`founder-outreach.test.mjs`, `server.test.mjs`) and by a live in-browser dashboard check with
+seeded data — see `docs/changelog.md`'s founder-outreach entry.

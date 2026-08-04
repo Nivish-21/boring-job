@@ -16,6 +16,9 @@ import { classifyResumeBucket } from './fit-evaluator.mjs';
 import { discoverJobUrls, verifyDiscoveredUrl, DiscoveryRunner } from './job-discovery.mjs';
 import { getFirecrawlUsage, getApifyUsage } from './usage-tracker.mjs';
 import { startDailyScheduler } from './scheduler.mjs';
+import { parseConnectionsCsv, filterFounders } from './connections-catalog.mjs';
+import { FounderStore } from './founder-store.mjs';
+import { FounderOutreachRunner } from './founder-outreach.mjs';
 
 const moduleDir = fileURLToPath(new URL('.', import.meta.url));
 const publicDir = join(moduleDir, '..', 'public');
@@ -27,7 +30,7 @@ const sendJson = (res, status, body) => {
   res.end(JSON.stringify(body));
 };
 
-const readJson = (req) => new Promise((resolve, reject) => {
+const readBody = (req) => new Promise((resolve, reject) => {
   let size = 0;
   let raw = '';
   req.setEncoding('utf8');
@@ -40,11 +43,20 @@ const readJson = (req) => new Promise((resolve, reject) => {
     }
     raw += chunk;
   });
-  req.on('end', () => {
-    try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error('request body must be valid JSON')); }
-  });
+  req.on('end', () => resolve(raw));
   req.on('error', reject);
 });
+
+const readJson = async (req) => {
+  const raw = await readBody(req);
+  try { return raw ? JSON.parse(raw) : {}; } catch { throw new Error('request body must be valid JSON'); }
+};
+
+const readText = async (req) => {
+  const raw = await readBody(req);
+  if (!raw.trim()) throw new Error('request body must not be empty');
+  return raw;
+};
 
 const isAuthorized = (req, auth) => {
   if (!auth.user || !auth.password) return true;
@@ -77,7 +89,7 @@ const serveStatic = async (res, pathname) => {
 
 const PIPELINE_JOB_STATUSES = ['needs_review', 'approved', 'skipped', 'expired', 'unverified', 'daily_cap_reached', 'rejected'];
 
-export const createApp = ({ store, pipeline, pipelineStore, discoveryRunner, artifactDir, auth, firecrawlApiKey, apifyApiToken }) => createServer(async (req, res) => {
+export const createApp = ({ store, pipeline, pipelineStore, discoveryRunner, founderOutreachRunner, artifactDir, auth, firecrawlApiKey, apifyApiToken }) => createServer(async (req, res) => {
   const url = new URL(req.url, 'http://worker.local');
   if (req.method === 'GET' && url.pathname === '/health') {
     return sendJson(res, 200, { ok: true, service: 'career-ops-worker', artifactDir, review_store: 'ready' });
@@ -118,6 +130,12 @@ export const createApp = ({ store, pipeline, pipelineStore, discoveryRunner, art
     if (req.method === 'POST' && url.pathname === '/api/discovery/run') {
       if (!discoveryRunner) return sendJson(res, 503, { ok: false, error: 'discovery runner is unavailable' });
       const result = await discoveryRunner.run();
+      return sendJson(res, 200, { ok: true, result });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/founders/import') {
+      if (!founderOutreachRunner) return sendJson(res, 503, { ok: false, error: 'founder outreach runner is unavailable' });
+      const founders = filterFounders(parseConnectionsCsv(await readText(req)));
+      const result = await founderOutreachRunner.run(founders);
       return sendJson(res, 200, { ok: true, result });
     }
     if (req.method === 'GET' && url.pathname === '/api/usage') {
@@ -201,7 +219,22 @@ export const startWorker = async ({
     apiKey: firecrawlApiKey,
     limit: dailyCap * 2
   });
-  const server = createApp({ store, pipeline, pipelineStore, discoveryRunner, artifactDir, auth, firecrawlApiKey, apifyApiToken });
+
+  const founderStore = new FounderStore(join(reviewDataDir, 'founders.json'));
+  await founderStore.initialize();
+  const founderOutreachRunner = new FounderOutreachRunner({
+    founderStore,
+    reviewStore: store,
+    pipeline,
+    lookupCompany: companyLookup,
+    resumeClassifier,
+    resumeBuckets,
+    firecrawlApiKey,
+    openaiApiKey,
+    cap: dailyCap
+  });
+
+  const server = createApp({ store, pipeline, pipelineStore, discoveryRunner, founderOutreachRunner, artifactDir, auth, firecrawlApiKey, apifyApiToken });
 
   server.listen(port, '0.0.0.0', () => {
     console.log(`career-ops-worker listening on ${port}`);

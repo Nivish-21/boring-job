@@ -10,6 +10,12 @@ const statusCheckboxes = [...document.querySelectorAll('input[name="status"]')];
 
 const formatDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 const formatResetDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
+// Founder-outreach timestamps show IST specifically, per an explicit user ask -- job cards stay
+// on the browser's local time zone, unchanged.
+const formatDateIst = (value) => new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+const formatCardDate = (card, value) => (card.kind === 'founder' ? formatDateIst : formatDate)(value);
+
+const KIND_LABELS = { job: 'Job', founder: 'Founder outreach' };
 
 const STATUS_LABELS = {
   pending: 'Pending review',
@@ -20,6 +26,14 @@ const STATUS_LABELS = {
   unverified: "Couldn't verify",
   expired: 'Expired / closed',
   aggregator_rejected: 'Rejected (bad source)'
+};
+
+// Founder-outreach titles are built as "<name> — <company>" (see founder-outreach.mjs); derived
+// here rather than stored a second time, since ReviewStore's schema has no dedicated company
+// field -- keeps the company filter working for founder cards without a store schema change.
+const founderCompanyFromTitle = (title) => {
+  const parts = String(title || '').split(' — ');
+  return parts.length > 1 ? parts.slice(1).join(' — ') : null;
 };
 
 let allCards = [];
@@ -41,11 +55,14 @@ const showMessage = (container, message, type = 'info') => {
 // collide with `ReviewStore`'s human-decision `'rejected'` status.
 const buildCards = (pipelineJobs, reviewItems) => {
   const reviewById = new Map(reviewItems.map((item) => [item.id, item]));
-  return pipelineJobs.map((job) => {
+  const referencedReviewIds = new Set(pipelineJobs.map((job) => job.review_item_id).filter(Boolean));
+
+  const jobCards = pipelineJobs.map((job) => {
     const reviewItem = job.review_item_id ? reviewById.get(job.review_item_id) : null;
     if (reviewItem) {
       return {
         key: job.stable_id,
+        kind: 'job',
         status: reviewItem.status,
         title: reviewItem.title,
         company: job.company,
@@ -64,6 +81,7 @@ const buildCards = (pipelineJobs, reviewItems) => {
     }
     return {
       key: job.stable_id,
+      kind: 'job',
       status: job.status === 'rejected' ? 'aggregator_rejected' : job.status,
       title: job.title || job.source_url,
       company: job.company,
@@ -80,6 +98,32 @@ const buildCards = (pipelineJobs, reviewItems) => {
       reviewItem: null
     };
   });
+
+  // Review items with no pipeline-job counterpart never surfaced before this pass -- currently
+  // that's only `kind: 'founder'` items, since every `kind: 'job'` review item is created from
+  // inside JobPipeline.process() and therefore always has a matching pipeline job.
+  const standaloneCards = reviewItems
+    .filter((item) => !referencedReviewIds.has(item.id))
+    .map((item) => ({
+      key: item.id,
+      kind: item.kind,
+      status: item.status,
+      title: item.title,
+      company: item.kind === 'founder' ? founderCompanyFromTitle(item.title) : null,
+      location: null,
+      source_url: item.source_url,
+      summary: item.summary,
+      fit_score: item.fit_score,
+      created_at: item.created_at,
+      expires_at: item.expires_at,
+      draft: item.draft,
+      evidence: item.evidence,
+      artifact_url: item.artifact_url,
+      company_links: null,
+      reviewItem: item
+    }));
+
+  return [...jobCards, ...standaloneCards];
 };
 
 const applyFilters = (cards) => {
@@ -115,8 +159,10 @@ const decide = async (reviewItem, action, button) => {
 const renderCard = (card) => {
   const fragment = template.content.cloneNode(true);
   const article = fragment.querySelector('.review-item');
-  fragment.querySelector('.item-meta').textContent = `${card.company || 'Unknown company'} · discovered ${formatDate(card.created_at)}`;
+  fragment.querySelector('.item-meta').textContent = `${card.company || 'Unknown company'} · discovered ${formatCardDate(card, card.created_at)}`;
   fragment.querySelector('h2').textContent = card.title;
+  fragment.querySelector('.kind').textContent = KIND_LABELS[card.kind] || card.kind;
+  fragment.querySelector('.kind').classList.add(`kind-${card.kind}`);
   fragment.querySelector('.status').textContent = STATUS_LABELS[card.status] || card.status;
   fragment.querySelector('.status').classList.add(`status-${card.status}`);
   fragment.querySelector('.summary').textContent = card.summary;
@@ -125,11 +171,11 @@ const renderCard = (card) => {
   const details = fragment.querySelector('.details');
   const fitClass = typeof card.fit_score === 'number' ? (card.fit_score >= 7 ? 'fit-good' : card.fit_score >= 5 ? 'fit-maybe' : 'fit-poor') : null;
   const fields = [
-    ['Discovered', formatDate(card.created_at)],
+    ['Discovered', formatCardDate(card, card.created_at)],
     ['Fit score', typeof card.fit_score === 'number' ? `${card.fit_score}/10` : null, fitClass],
     ['Location', card.location],
-    ['Expires', card.status === 'pending' ? formatDate(card.expires_at) : null],
-    ['Last updated', card.status !== 'pending' && card.updated_at ? formatDate(card.updated_at) : null]
+    ['Expires', card.status === 'pending' ? formatCardDate(card, card.expires_at) : null],
+    ['Last updated', card.status !== 'pending' && card.updated_at ? formatCardDate(card, card.updated_at) : null]
   ];
   fields.filter(([, value]) => value).forEach(([label, value, className]) => {
     const term = document.createElement('dt');

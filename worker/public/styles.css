@@ -39,6 +39,9 @@ h3 { margin: 1.5rem 0 .65rem; font-size: .95rem; }
 .queue { display: grid; gap: 1rem; }
 .review-item { padding: 1.4rem; border: 1px solid var(--line); border-radius: 12px; }
 .item-heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
+.badges { flex: 0 0 auto; display: flex; align-items: center; gap: .5rem; }
+.kind { flex: 0 0 auto; padding: .28rem .55rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: .8rem; font-weight: 700; }
+.kind-founder { border-color: var(--primary); color: var(--primary); }
 .status { flex: 0 0 auto; padding: .28rem .55rem; border-radius: 999px; background: var(--surface); color: var(--primary); font-size: .8rem; font-weight: 700; text-transform: capitalize; }
 .status-skipped, .status-expired, .status-unverified { color: var(--muted); }
 .status-daily_cap_reached { color: var(--warn); }
