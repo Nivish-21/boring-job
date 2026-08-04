@@ -53,7 +53,7 @@ test('classifies HTTP error statuses for the circuit breaker', async () => {
     [401, 'unauthorized'],
     [429, 'rate_limited'],
     [402, 'quota_exhausted'],
-    [403, 'quota_exhausted'],
+    [403, 'unknown'],
     [500, 'unknown']
   ];
 

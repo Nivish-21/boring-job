@@ -59,3 +59,50 @@ dependency-free pattern for small durable JSON state, and the Postgres container
 n8n's schema — reusing it here would mean either sharing a database across two owners or adding
 a new schema/migration path for a few key-value rows. Not worth the coupling for a small state
 file that only the worker process reads/writes.
+
+---
+
+## 2026-08-04 — Firecrawl HTTP 403 reclassified from `quota_exhausted` to `unknown`
+
+**Context:** First live discovery run tripped the circuit breaker on Firecrawl after a single
+scrape of a site that returned "we do not support this site" (HTTP 403) — a per-URL business
+rejection, not an account-level quota signal. `docs/decisions.md`'s circuit-breaker policy
+disables `quota_exhausted` indefinitely with no auto-retry, so this one unrelated site
+permanently killed Firecrawl for the rest of the pipeline's life, forcing every subsequent
+discovered URL onto the paid Apify fallback for the remainder of that run (confirmed against
+real Apify dashboard usage, not just logs).
+
+**Decision:** `firecrawl-client.mjs`'s `classifyError` only maps HTTP 402 to `quota_exhausted`
+now; 403 falls through to `unknown` (15-minute auto-recovering cooldown), same as any other
+unexplained failure.
+
+**Reasoning:** Only 402 (Payment Required) is an unambiguous account-level billing/quota
+signal. 403 is used by Firecrawl for both quota and unrelated per-URL scrape rejections, and
+conflating them let one bad site take down the whole provider for the rest of the day.
+
+---
+
+## 2026-08-04 — Dedupe by provider-derived stable ID before verification, not after
+
+**Context:** `JobPipeline.process()` persisted `needs_review`/`skipped` outcomes but called
+`verify()`/`verifyFallback()` (Firecrawl/Apify, real cost) before ever checking whether that
+URL had already been processed. Worse, a `manual_review` (inconclusive verification) or
+`expired` (closed) outcome was never persisted at all — meaning a permanently unscrapable URL
+would be re-verified, at real cost, on every single future discovery run indefinitely. Both
+were confirmed live: a discovery run's already-seen URLs were being re-scraped every day, and
+Apify's dashboard showed real paid runs for URLs that had already been fully processed.
+
+**Decision:** `process()` now computes the job's provider-derived stable ID from the URL alone
+(`selectProvider()`, a pure/local function — no network call) as the very first step, and
+returns `duplicate` immediately if a record already exists under that ID, before calling
+`verify()` at all. Non-live outcomes (`manual_review`, `expired`) are now persisted too
+(`status: 'unverified'` / `'expired'`), so they get the same before-verification short-circuit
+on every future run.
+
+**Reasoning:** `selectProvider()` parses Greenhouse/Lever/Ashby board tokens and job IDs
+directly from the URL string, and constructs the exact same stable-ID format the live-verified
+path already uses (`greenhouse:<board>:<id>`, `manual:<url>`, etc.) — so the pre-check and
+post-verification stable IDs always agree, with no extra network cost to compute it. Verified
+live: a second discovery run against the same default query showed 5 of 6 discovered URLs
+short-circuit to `duplicate` with zero Firecrawl/Apify calls, and Apify wasn't invoked at all
+that run.

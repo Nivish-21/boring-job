@@ -4,7 +4,10 @@ const requestTimeoutMs = 20_000;
 const classifyError = (status) => {
   if (status === 401) return 'unauthorized';
   if (status === 429) return 'rate_limited';
-  if (status === 402 || status === 403) return 'quota_exhausted';
+  if (status === 402) return 'quota_exhausted';
+  // 403 also covers per-URL "we don't support this site" rejections, not just
+  // account-level quota — 'unknown' gets a short cooldown instead of disabling
+  // the whole provider indefinitely on a single unrelated site.
   return 'unknown';
 };
 

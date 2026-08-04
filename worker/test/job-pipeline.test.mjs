@@ -161,3 +161,56 @@ test('companyName falls back to a hostname-derived guess for discovered (non-ATS
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('persists a non-live verification outcome and never re-verifies that URL again', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  let verifyCalls = 0;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => { verifyCalls += 1; return { liveness: 'unverified', verification_status: 'checked', error: 'Firecrawl and Apify both failed.' }; }
+  });
+
+  try {
+    const first = await pipeline.process({ source_url: 'https://careers.example.com/jobs/dead-end' });
+    assert.equal(first.stage, 'manual_review');
+    assert.equal(first.record.status, 'unverified');
+    assert.equal(verifyCalls, 1);
+
+    const second = await pipeline.process({ source_url: 'https://careers.example.com/jobs/dead-end' });
+    assert.equal(second.stage, 'duplicate');
+    assert.equal(verifyCalls, 1, 'a known-dead URL must not pay for verification again');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('persists a closed job as expired and never re-verifies that URL again', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  let verifyCalls = 0;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => { verifyCalls += 1; return { liveness: 'closed', verification_status: 'checked', error: 'Greenhouse no longer returns this job posting.' }; }
+  });
+
+  try {
+    const first = await pipeline.process({ source_url: 'https://boards.greenhouse.io/acme/jobs/999' });
+    assert.equal(first.stage, 'expired');
+    assert.equal(first.record.status, 'expired');
+
+    const second = await pipeline.process({ source_url: 'https://boards.greenhouse.io/acme/jobs/999' });
+    assert.equal(second.stage, 'duplicate');
+    assert.equal(verifyCalls, 1, 'a closed job must not pay for verification again');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

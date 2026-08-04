@@ -2,6 +2,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { verifyJob } from './job-verifier.mjs';
+import { selectProvider } from './provider-selector.mjs';
+
+const computeStableId = (selection) => {
+  if (selection.provider === 'greenhouse') return `greenhouse:${selection.board_token}:${selection.job_id}`;
+  if (selection.provider === 'lever') return `lever:${selection.site}:${selection.job_id}`;
+  if (selection.provider === 'ashby') return `ashby:${selection.board_name}:${selection.job_id}`;
+  return `manual:${selection.source_url}`;
+};
 
 const SUPPORTED_STACK = [['Node.js', /\bnode(?:\.js)?\b/i], ['JavaScript', /\bjavascript\b/i], ['TypeScript', /\btypescript\b/i], ['Python', /\bpython\b/i], ['FastAPI', /\bfastapi\b/i], ['Django', /\bdjango\b/i], ['Docker', /\bdocker\b/i], ['PostgreSQL', /\bpostgres(?:ql)?\b/i]];
 const EXCLUDED_STACK = [['mobile-only', /\b(?:android|ios|swift|react native|flutter)\b/i], ['data-science/ML-infrastructure', /\b(?:data scientist|machine learning engineer|ml infrastructure|gpu|cuda)\b/i], ['specialist language', /\b(?:kotlin|golang|go developer|rust|ruby on rails|c\+\+|embedded c)\b/i]];
@@ -51,11 +59,23 @@ export class JobPipeline {
     Object.assign(this, { store, reviewStore, artifactDir, verify, verifyFallback, resumeClassifier, resumeBuckets, companyLookup, dailyCap });
   }
   async process({ source_url: sourceUrl, candidate } = {}) {
+    // Dedupe by the URL's own provider-derived ID before spending anything on verification —
+    // a URL already recorded as needs_review/skipped/expired/unverified is not worth re-paying
+    // Firecrawl/Apify for on every discovery run (see docs/decisions.md).
+    const selection = selectProvider(sourceUrl);
+    const priorStableId = computeStableId(selection);
+    const priorRecord = await this.store.getByStableId(priorStableId);
+    if (priorRecord) return { stage: 'duplicate', existing: priorRecord };
+
     let verification = await this.verify(sourceUrl);
     if (verification.liveness === 'unverified' && this.verifyFallback) {
       verification = await this.verifyFallback(sourceUrl);
     }
-    if (verification.liveness !== 'live') return { stage: verification.liveness === 'closed' ? 'expired' : 'manual_review', verification };
+    if (verification.liveness !== 'live') {
+      const status = verification.liveness === 'closed' ? 'expired' : 'unverified';
+      const record = await this.store.record({ stable_id: priorStableId, status, source_url: selection.source_url });
+      return { stage: status === 'expired' ? 'expired' : 'manual_review', verification, record };
+    }
     const existing = await this.store.getByStableId(verification.job.stable_id);
     if (existing?.status === 'needs_review' || existing?.status === 'approved') return { stage: 'duplicate', existing, verification };
     const evaluation = evaluateJob(verification.job);

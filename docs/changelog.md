@@ -65,3 +65,38 @@ reuse regardless — it was live-tested in a prior turn.
 
 **Verification:** `git rev-parse main` matched `git ls-remote origin main` post-push
 (per lessons: never trust push exit status/output alone).
+
+## 2026-08-04 — First live discovery run, plus two bugs it surfaced (fixed)
+
+Ran `docker compose up -d --build` with real `FIRECRAWL_API_KEY`/`APIFY_API_TOKEN` for the
+first time (`OPENAI_API_KEY` still not supplied — resume classification degrades to `null` as
+designed, everything else worked). `DAILY_LEAD_CAP` set to 3 for this first cautious test.
+Resume bind mount confirmed working (8 resumes visible inside the container).
+
+**Bug 1 — Firecrawl circuit breaker misclassification (see `docs/decisions.md`):**
+`firecrawl-client.mjs`'s `classifyError` grouped HTTP 403 with 402 as `quota_exhausted`. A live
+scrape hit a site returning 403 "we do not support this site" — a per-URL rejection, not a
+quota signal — and the circuit breaker disabled Firecrawl **indefinitely**, forcing the rest of
+that run onto the paid Apify fallback (confirmed against the real Apify dashboard: 3 paid runs,
+$0.07 of a $5 budget, for a 3-item test). Fixed: 403 now maps to `unknown` (15-minute
+auto-recovering cooldown). Test updated (`worker/test/firecrawl-client.test.mjs`).
+
+**Bug 2 — no dedup before paying for verification (see `docs/decisions.md`):**
+`JobPipeline.process()` called `verify()`/`verifyFallback()` (real Firecrawl/Apify cost) before
+checking whether the URL had already been processed, and never persisted `manual_review`
+(inconclusive verification) or `expired` (closed) outcomes at all — so a permanently
+unscrapable URL would be re-verified, at cost, on every future discovery run forever. Fixed:
+`process()` now computes the provider-derived stable ID from the URL alone (`selectProvider()`,
+local, no network cost) as the first step, short-circuits to `duplicate` before calling
+`verify()` if a record already exists, and persists non-live outcomes too
+(`status: 'unverified'`/`'expired'`). Two new tests
+(`worker/test/job-pipeline.test.mjs`) assert `verify()` is never called a second time for a
+known-dead URL.
+
+**Live verification:** re-ran discovery after both fixes — 5 of 6 discovered URLs
+short-circuited to `duplicate` with zero Firecrawl/Apify calls; Apify wasn't invoked at all that
+run. 63/63 tests passing project-wide.
+
+**Not yet done:** `OPENAI_API_KEY` still needed for resume-bucket classification; a
+credit/usage-tracking feature for the review dashboard was requested and is being scoped
+separately (see `docs/plan.md`).
