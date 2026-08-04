@@ -418,10 +418,19 @@ anything else built this session. Recommending against building that path.
 - [ ] Reuse `company-lookup.mjs` (already built/tested) to find each flagged founder's company
       website via public Firecrawl search — no login, same pattern already used for job-listing
       company profiles.
+- [ ] Check the company for open roles by feeding it through the existing job-discovery path —
+      look for a careers/jobs page or a Greenhouse/Lever/Ashby board under the company's name
+      (`provider-selector.mjs` already detects these), then run any postings found through the
+      unmodified `JobPipeline.process()` (same verification/fit-scoring/resume-matching every
+      other job in this project already gets). User's own idea, added 2026-08-04: if a company
+      has a real opening, draft the cold DM around that specific role instead of a generic
+      "let's connect," with the resume match coming along for free. Reuses existing code
+      end-to-end — no new discovery/verification/scoring logic needed for this part.
 - [ ] New LLM step (same shape as `fit-evaluator.mjs`): scrape the company site, have the LLM
       summarize what they do and draft a specific value-add angle grounded in the user's real
-      background (can reuse the resume `reference_text` wired in earlier), then draft a short
-      personalized message.
+      background (can reuse the resume `reference_text` wired in earlier). If step above found a
+      matching open role, draft the message around that role; otherwise draft the generic
+      value-add message.
 - [ ] Drafts land in the existing review dashboard, same approve/reject/regenerate flow. Nothing
       auto-sends — matches this project's standing rule.
 - [ ] Display timestamps for this feature in IST specifically.
