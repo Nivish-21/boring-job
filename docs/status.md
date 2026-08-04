@@ -18,27 +18,33 @@ data**: imports a LinkedIn connections CSV (official export, no scraping), ident
 researches their companies, checks for a real open role through the unmodified job pipeline, and
 drafts a personalized outreach message for human review — never auto-sends. First real batch (3
 founders, capped) ran successfully against the user's actual 576-connection export; see "Active
-plan" below for results and an outstanding key-rotation item. `OPENAI_API_KEY` is now supplied.
-109/109 tests passing; `docker compose config --quiet` validates clean.
+plan" below for results and an outstanding key-rotation item. `OPENAI_API_KEY` is now supplied,
+and founder-outreach drafting uses `gpt-5.6-terra` (mid-tier, not the cheapest) specifically for
+message quality. 112/112 tests passing; `docker compose config --quiet` validates clean.
 
-## Active plan — founder-outreach feature: LIVE-VERIFIED against real data (2026-08-04)
+## Active plan — founder-outreach: LIVE-VERIFIED, then a quality-fix pass, also LIVE-VERIFIED (2026-08-04)
 
-First real run complete: imported the user's actual LinkedIn `Connections.csv` (576 connections,
-176 flagged as founders) via `POST /api/founders/import` against the worker running locally with
-real `FIRECRAWL_API_KEY`/`APIFY_API_TOKEN`/`OPENAI_API_KEY` and pointed at the real
-`data/review/`/`data/artifacts/` dirs (not a throwaway test dir). Capped at 3 for this first
-batch (`DAILY_LEAD_CAP=3` in `.env`). All 3 processed successfully, all 3 got a real OpenAI-
-drafted message, confirmed rendering correctly in the real dashboard (badge, IST timestamp,
-draft, evidence, Firecrawl/Apify usage strip all showing real numbers). Remaining 173 flagged
-founders are untouched — re-running the import will pick up the next batch (already-processed
-founders are skipped via `founderStore`).
+First real run (3 founders, capped): imported the user's actual LinkedIn `Connections.csv` (576
+connections, 176 flagged as founders) via `POST /api/founders/import`. All 3 processed, all 3 got
+a real OpenAI-drafted message, confirmed rendering correctly in the real dashboard. User then
+flagged the messages as weak and asked for a hard 300-char-adjacent cap (LinkedIn's connection-
+note limit). Fixed and **re-verified live against 6 more real founders** (9 total processed of
+176 flagged; 167 remain, untouched — re-running the import picks up the next batch automatically,
+already-processed founders are skipped): switched the drafting model to `gpt-5.6-terra`, added a
+hard 285-char code-level truncation backstop, added a code-level guard that nulls out any message
+still containing a bracketed placeholder, rewrote the prompt with explicit banned phrases and a
+paired good/bad example. Full reasoning and both live-verification passes in `docs/decisions.md`.
 
-**Real-data observations, not bugs:** 2 of 3 founders' companies had no discoverable website/
-LinkedIn/open role (small/early startups with thin web presence) — those drafts are generic
-value-add messages. One draft included a literal `[your area of expertise]` placeholder where
-the LLM had no resume/company context to fill in — a real quality signal that draft quality
-depends on how much Firecrawl actually finds, worth knowing before approving anything, not
-something to "fix" in code.
+**Real-data observations from the live checks, not code bugs:**
+- Some founders' companies have no discoverable website/LinkedIn/open role (small/early startups
+  with thin web presence) — those get a shorter, generic value-add message. Expected.
+- One drafted message named a founder's company differently than the name on record (likely an
+  ambiguous company-website search match) — flagged to the user for manual review, not silently
+  "fixed," since it's a grounding/correctness issue the human-review step exists to catch.
+- The model-switch live check also caught a real bug the unit tests couldn't have: `gpt-5.6-terra`
+  rejects any non-default `temperature`, so the first post-switch live batch silently drafted
+  nothing (degraded gracefully, but zero real output) until the hardcoded `temperature: 0.4`
+  (left over from the `gpt-4o-mini` era) was removed.
 
 **Security incident during this run (logged in full in `~/.claude/lessons.md` and
 `docs/lessons.md`):** a `grep` on `.env` intended to just confirm which vars were set instead
@@ -50,8 +56,9 @@ in each provider's dashboard, update `.env`, no code changes needed.
 
 **Real `Connections.csv` lives at `worker/founder-outreach/import.zip/Connections.csv`**
 (git-ignored — the folder holds the user's full LinkedIn data-archive export, real PII, never
-committed). Re-running `POST /api/founders/import` against that same file picks up the next
-batch of the remaining 173 flagged founders automatically (already-processed ones are skipped).
+committed). 9 of 176 flagged founders processed so far; re-running `POST /api/founders/import`
+against that same file picks up the next batch of the remaining 167 automatically
+(already-processed ones are skipped).
 
 `DISCOVERY_SCHEDULE_ENABLED` is still off by default for the existing job-discovery pipeline —
 turn on when the user wants real unattended daily runs.

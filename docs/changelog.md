@@ -328,3 +328,38 @@ console errors.
 Firecrawl/OpenAI calls — blocked on the user supplying the CSV (and, optionally, confirming
 `OPENAI_API_KEY`, still not supplied project-wide). See `docs/decisions.md` for the
 implementation deviations made from the original design sketch.
+
+## 2026-08-04 — First live founder-outreach run, then a quality fix pass
+
+Full reasoning in `docs/decisions.md`. Ran the real founder-outreach import against the user's
+actual LinkedIn `Connections.csv` (576 connections, 176 flagged founders). User then flagged the
+drafted messages as too weak and pointed out LinkedIn's 300-char cap on connection notes.
+
+**Changed (`worker/src/founder-outreach.mjs`):**
+- Default model: `gpt-4o-mini` → `gpt-5.6-terra` (OpenAI's current mid-tier model, verified
+  against the official docs) — a stronger model for this creative-writing task specifically.
+- New `MAX_MESSAGE_CHARS = 285` — a hard code-level truncation backstop
+  (`truncateToWordBoundary`), on top of a prompt instruction, so a draft never exceeds LinkedIn's
+  300-char limit regardless of what the model returns.
+- New `PLACEHOLDER_PATTERN` guard — a message containing a literal `[bracketed placeholder]` is
+  discarded (`message: null`) rather than shipped to review, since the prompt-only instruction
+  banning placeholders was live-verified as not reliably followed.
+- System prompt rewritten: banned specific filler phrases and vague compliments observed in the
+  real first-run output, added a paired good/bad example.
+- Removed the hardcoded `temperature: 0.4` — `gpt-5.6-terra` rejects any non-default temperature
+  outright. **Caught only by live re-verification, not the unit test suite** — it silently
+  nulled every draft in the first post-switch real run.
+
+**Tests:** 2 new/updated in `founder-outreach.test.mjs` (default model in request body asserted;
+placeholder message nulled out). 112/112 passing project-wide, zero regressions.
+
+**Verified live (twice):** the first live re-run after the model switch caught the temperature
+bug (all drafts came back null); the second confirmed real, materially stronger drafts — no
+filler openers, no placeholders, all ≤285 chars, specific asks. Also surfaced (and flagged to the
+user, not silently fixed) a separate real issue: one draft referred to a founder's company by a
+different name than the one on record, likely an ambiguous company-website search match — a
+grounding/correctness issue for human review to catch, not a prompt-quality one.
+
+**Operational note:** the real (git-ignored, PII) `Connections.csv` used for both live runs lives
+at `worker/founder-outreach/import.zip/Connections.csv` — a local scratch location, never
+committed.

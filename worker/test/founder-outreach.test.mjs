@@ -49,12 +49,25 @@ const chatResponse = (content) => async (url, init) => {
   return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { status: 200 });
 };
 
-test('draftOutreachMessage returns the drafted message and reason', async () => {
+test('draftOutreachMessage returns the drafted message and reason, using the mid-tier default model', async () => {
   const result = await draftOutreachMessage({ founder }, {
     apiKey: 'sk-test',
-    fetchImpl: chatResponse({ message: 'Hi Jane, ...', reason: 'Generic value-add message' })
+    fetchImpl: async (url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(body.model, 'gpt-5.6-terra');
+      return chatResponse({ message: 'Hi Jane, ...', reason: 'Generic value-add message' })(url, init);
+    }
   });
   assert.deepEqual(result, { message: 'Hi Jane, ...', reason: 'Generic value-add message' });
+});
+
+test('draftOutreachMessage nulls out a message that still contains a bracketed placeholder', async () => {
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({ message: 'Hi Jane, I have experience in [relevant area] and would love to chat.', reason: 'Generic outreach' })
+  });
+  assert.equal(result.message, null);
+  assert.match(result.reason, /placeholder/);
 });
 
 test('draftOutreachMessage degrades to message null without throwing when the API key is missing', async () => {
@@ -85,6 +98,28 @@ test('draftOutreachMessage degrades to message null without throwing on a reques
   });
   assert.equal(result.message, null);
   assert.equal(result.reason, 'OpenAI request timed out');
+});
+
+test('draftOutreachMessage truncates an over-length message to 285 chars at a word boundary', async () => {
+  const longMessage = 'This is a very long outreach message that keeps going and going far past the platform limit '.repeat(4).trim();
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({ message: longMessage, reason: 'Generic outreach' })
+  });
+  assert.ok(result.message.length <= 285);
+  assert.notEqual(result.message.at(-1), ' ');
+  assert.ok(longMessage.startsWith(result.message));
+  assert.match(result.reason, /truncated to fit the 285-character limit/);
+});
+
+test('draftOutreachMessage leaves a message at or under 285 chars untouched', async () => {
+  const shortMessage = 'Hi Jane, saw Nimbus is hiring a backend engineer -- I have shipped production Node/Python systems and would love to chat about the role.';
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({ message: shortMessage, reason: 'Role-specific outreach' })
+  });
+  assert.equal(result.message, shortMessage);
+  assert.equal(result.reason, 'Role-specific outreach');
 });
 
 const fakeFounderStore = () => {

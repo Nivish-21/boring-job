@@ -2,8 +2,18 @@ import { firecrawlSearch, firecrawlScrape } from './firecrawl-client.mjs';
 import { selectProvider } from './provider-selector.mjs';
 
 const API_URL = 'https://api.openai.com/v1/chat/completions';
-const DEFAULT_MODEL = 'gpt-4o-mini';
+// Mid-tier model, not the cheapest -- outreach drafting is a creative-writing task where a
+// stronger model measurably reduces filler/generic phrasing and placeholder artifacts (verified
+// live: the cheaper tier left a literal "[specific area related to tech]" in a real draft).
+const DEFAULT_MODEL = 'gpt-5.6-terra';
 const requestTimeoutMs = 30_000;
+// LinkedIn caps a connection-note-style message at 300 characters; 285 leaves headroom so a
+// draft never lands right at the platform's hard wall.
+const MAX_MESSAGE_CHARS = 285;
+// Backstop for the "never leave a placeholder" prompt rule -- catches it in code rather than
+// trusting the model to always follow a negative instruction (same principle as fit-evaluator
+// .mjs nulling out a hallucinated bucket_id instead of trusting it blindly).
+const PLACEHOLDER_PATTERN = /\[[^\]]+\]/;
 
 const isAtsBoardUrl = (url) => {
   try { return selectProvider(url).provider !== 'manual'; } catch { return false; }
@@ -53,13 +63,38 @@ const buildMessages = ({ founder, companyContext, matchedJob, resumeBucket }) =>
   return [
     {
       role: 'system',
-      content: 'You draft a short, personalized, professional cold-outreach message from a job-seeking candidate to a founder they are already connected with on LinkedIn. Never invent a fact not given in the prompt. Respond with JSON only: {"message": string, "reason": string}.'
+      content: `You draft a short, specific, professional cold-outreach message from a job-seeking candidate to a founder they are already connected with on LinkedIn.
+
+Hard rules:
+- The message MUST be under ${MAX_MESSAGE_CHARS} characters total, including spaces -- this is a hard platform limit, not a suggestion. Write tight from the start; do not pad it and expect truncation to fix it.
+- Never use generic filler openers like "I hope this message finds you well" or "I've been following your journey".
+- Never invent a fact not given in the prompt, and never leave a bracketed placeholder like "[your area of expertise]" -- if there is no specific real detail to use, omit that clause instead of guessing.
+- Lead with one specific, concrete reason for reaching out (the open role if given, or a real detail from the company context) -- not a compliment.
+- End with a single, low-friction, specific ask -- not just "let's connect".
+
+Good example (specific, tight, no filler), 178 characters:
+"Hi Raj, saw Nimbus is hiring a Senior Backend Engineer. I've spent 4 years building production Node/Python APIs at scale -- open to a 15-min chat about the role this week?"
+
+Bad example, do NOT write like this -- generic opener, vague compliment, placeholder, weak ask:
+"Hi Raj, I hope this message finds you well! I've been following Nimbus's journey and am really impressed by your innovative approach. I have experience in [relevant area] and would love to explore potential synergies. Looking forward to connecting!"
+
+Respond with JSON only: {"message": string, "reason": string}.`
     },
     {
       role: 'user',
       content: `Founder: ${founder.first_name} ${founder.last_name}, ${founder.position || 'unknown title'} at ${founder.company || 'an unknown company'}.\nCompany website content (may be partial): ${companyContext || 'unavailable'}.\n${roleContext}\n${resumeContext}`
     }
   ];
+};
+
+// Backstop for MAX_MESSAGE_CHARS -- the prompt asks the model to stay under the limit, but LLMs
+// don't reliably hit an exact character target, so this is enforced in code regardless of what
+// the model returns. Cuts at the last full word boundary rather than mid-word.
+const truncateToWordBoundary = (text, maxChars) => {
+  if (text.length <= maxChars) return text;
+  const truncated = text.slice(0, maxChars);
+  const lastSpace = truncated.lastIndexOf(' ');
+  return (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated).trim();
 };
 
 export const draftOutreachMessage = async ({ founder, companyContext, matchedJob, resumeBucket } = {}, { apiKey, fetchImpl = fetch, model = DEFAULT_MODEL } = {}) => {
@@ -75,9 +110,11 @@ export const draftOutreachMessage = async ({ founder, companyContext, matchedJob
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         model,
+        // gpt-5.6-terra (the default model) rejects any non-default temperature outright
+        // (verified live: "Only the default (1) value is supported") -- omit it rather than
+        // pin a value that only worked for the older gpt-4o-mini default.
         messages: buildMessages({ founder, companyContext, matchedJob, resumeBucket }),
-        response_format: { type: 'json_object' },
-        temperature: 0.4
+        response_format: { type: 'json_object' }
       }),
       signal: controller.signal
     });
@@ -90,8 +127,15 @@ export const draftOutreachMessage = async ({ founder, companyContext, matchedJob
     const json = await response.json();
     const content = json?.choices?.[0]?.message?.content;
     const parsed = JSON.parse(content);
-    const message = typeof parsed.message === 'string' && parsed.message.trim() ? parsed.message.trim() : null;
-    const reason = typeof parsed.reason === 'string' ? parsed.reason : '';
+    let message = typeof parsed.message === 'string' && parsed.message.trim() ? parsed.message.trim() : null;
+    let reason = typeof parsed.reason === 'string' ? parsed.reason : '';
+    if (message && PLACEHOLDER_PATTERN.test(message)) {
+      return { message: null, reason: 'Model left a bracketed placeholder in the draft -- needs regeneration' };
+    }
+    if (message && message.length > MAX_MESSAGE_CHARS) {
+      message = truncateToWordBoundary(message, MAX_MESSAGE_CHARS);
+      reason = reason ? `${reason} (truncated to fit the ${MAX_MESSAGE_CHARS}-character limit)` : `Truncated to fit the ${MAX_MESSAGE_CHARS}-character limit`;
+    }
     return { message, reason };
   } catch (error) {
     const reason = error?.name === 'AbortError' ? 'OpenAI request timed out' : (error?.message || 'OpenAI request failed');

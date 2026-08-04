@@ -336,3 +336,51 @@ search filter, rather than changing the store schema.
 **Verification:** all four choices are exercised by the test suite added alongside them
 (`founder-outreach.test.mjs`, `server.test.mjs`) and by a live in-browser dashboard check with
 seeded data — see `docs/changelog.md`'s founder-outreach entry.
+
+## 2026-08-04 — Founder-outreach message quality: mid-tier model, hard char cap, placeholder guard
+
+**Context:** After the first live founder-outreach run, the user flagged the drafted messages as
+"too weak" (generic filler openers, vague compliments, one literal bracket placeholder that
+slipped through) and pointed out LinkedIn's 300-character cap on connection-note-style messages.
+
+**Decision 1 — switched `draftOutreachMessage`'s default model from `gpt-4o-mini` to
+`gpt-5.6-terra`** (OpenAI's current mid-tier model, verified against `developers.openai.com/api/
+docs/models` directly rather than trusting SEO pricing-aggregator search results, which named it
+inconsistently). User confirmed they have access to all OpenAI models and were fine paying for a
+stronger tier specifically for this creative-writing task — classification-style calls elsewhere
+(`fit-evaluator.mjs`'s `classifyResumeBucket`) are unaffected, left on the cheaper tier, since
+they don't have the same prose-quality bar.
+
+**Decision 2 — hard 285-char cap enforced in code, not just requested in the prompt.** The
+system prompt states the limit explicitly, but a code-level backstop
+(`truncateToWordBoundary`) truncates any over-length response to a clean word boundary — the
+`reason` field notes when this happened so a reviewer knows to double check the cut point.
+LLMs don't reliably hit an exact character target from prompt instructions alone.
+
+**Decision 3 — placeholder bracket pattern (`/\[[^\]]+\]/`) detected and nulled out in code, not
+just banned in the prompt.** Live-verified that the prompt instruction alone ("never leave a
+bracketed placeholder") was not reliably followed even by `gpt-5.6-terra` — one real draft still
+contained `[specific area related to tech]`. Now: any message matching the pattern is discarded
+(`message: null`, reason explains why) rather than shipped to review looking broken. Same
+principle already used in `fit-evaluator.mjs` (nulling a hallucinated `bucket_id` instead of
+trusting the model's output blindly) — validate model output in code, don't just instruct and
+hope.
+
+**Bug caught during live verification, not by unit tests:** `gpt-5.6-terra` rejects any
+non-default `temperature` value outright (`"Only the default (1) value is supported"`). The
+existing `temperature: 0.4` (carried over from the `gpt-4o-mini` era) made every single draft in
+the first post-switch live run fail — degrading gracefully to `message: null` per the existing
+error-handling design, so nothing crashed, but no messages were generated either. Removed the
+explicit `temperature` field entirely. **This is why the live re-verification step matters and
+mock-based unit tests alone would have missed it** — no test asserts against the real OpenAI API
+schema for a specific model's accepted parameters.
+
+**Verification:** 2 new/updated tests in `founder-outreach.test.mjs` (default model asserted in
+the request body; placeholder message nulled out). Live-verified twice against the real
+`Connections.csv` — the first live re-run caught the temperature bug (all 3 drafts came back
+null), the second confirmed real drafts with no filler, no placeholders, all ≤285 chars, and
+correctly using specific asks. One real, separate issue surfaced by this same live check and
+flagged to the user rather than silently "fixed": a drafted message referred to a founder's
+company by a different name than the one listed for them (likely an ambiguous company-website
+search match) — a correctness/grounding issue, not a prompt-quality one, left for human review
+to catch as designed.
