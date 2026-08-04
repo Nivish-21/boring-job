@@ -392,3 +392,38 @@ scheduler, zero new dependencies.
 - Auto-apply or auto-send of any kind.
 - Generating a brand-new (9th) resume variant for no-match jobs — flag for
   manual review instead.
+
+## New task block: founder outreach from LinkedIn connections (2026-08-04) — PROPOSED, NOT STARTED
+
+**Goal:** User wants to identify founders among their LinkedIn connections, research each
+founder's company, and get a drafted (never sent) personalized outreach message per founder,
+human-reviewed via the existing dashboard. Timestamps for this feature shown in IST.
+
+**Explicitly not activated yet** — user said not to build/start this now; this block exists so
+the request and the flagged concern below aren't lost before the next session.
+
+**Flagged before any build (see docs/decisions.md once logged):** the user's original idea was
+Apify/Firecrawl scraping the LinkedIn connections list directly. That list is only visible
+logged into the account, so scraping it means handing real LinkedIn credentials to a scraper or
+automating a logged-in session — both violate LinkedIn's Terms of Service and risk LinkedIn
+banning the user's actual professional account, a materially worse and less reversible cost than
+anything else built this session. Recommending against building that path.
+
+**Proposed approach instead (not yet approved to build):**
+- [ ] User manually exports connections via LinkedIn's own official data export (Settings &
+      Privacy → "Get a copy of your data" → Connections) — a CSV with name, current
+      position/company, connected date, profile URL. No scraping, no credentials shared.
+- [ ] New worker module to parse that CSV and flag likely founders by title-keyword matching
+      (Founder, Co-Founder, CEO, Founding Engineer, etc.) — local, free.
+- [ ] Reuse `company-lookup.mjs` (already built/tested) to find each flagged founder's company
+      website via public Firecrawl search — no login, same pattern already used for job-listing
+      company profiles.
+- [ ] New LLM step (same shape as `fit-evaluator.mjs`): scrape the company site, have the LLM
+      summarize what they do and draft a specific value-add angle grounded in the user's real
+      background (can reuse the resume `reference_text` wired in earlier), then draft a short
+      personalized message.
+- [ ] Drafts land in the existing review dashboard, same approve/reject/regenerate flow. Nothing
+      auto-sends — matches this project's standing rule.
+- [ ] Display timestamps for this feature in IST specifically.
+
+**Awaiting the user's go-ahead before any of this is built.**
