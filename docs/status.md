@@ -101,6 +101,11 @@ See `docs/decisions.md` for full reasoning. Summary:
   Built and unit-tested 2026-08-04 — implementation deviations from the original design sketch
   (single combined LLM call, ATS-priority URL sort, always-create-review-item-on-draft-failure,
   title-derived company filter) are logged in `docs/decisions.md`.
+- Founder-outreach drafting uses `gpt-5.6-terra` (mid-tier), not the cheaper model used
+  elsewhere in the project — a creative-writing task benefits from it, classification-style
+  calls (`fit-evaluator.mjs`) don't and are unaffected. Hard 285-char cap and a bracketed-
+  placeholder guard are both enforced in code, not just requested in the prompt — live
+  verification showed prompt-only instructions aren't reliably followed.
 
 ## Minor decisions
 
@@ -141,9 +146,11 @@ See `docs/decisions.md` for full reasoning. Summary:
 1. **Rotate `FIRECRAWL_API_KEY`, `APIFY_API_TOKEN`, and `OPENAI_API_KEY`** — exposed in a
    conversation transcript on 2026-08-04, user chose to defer rotation to finish the test import
    first. Regenerate in each provider's dashboard, update `.env`.
-2. Review the 3 drafted founder-outreach messages in the dashboard (approve/reject/regenerate).
-   Re-run `POST /api/founders/import` with the same `Connections.csv` to process the next batch
-   of the remaining 173 flagged founders whenever ready — raise `DAILY_LEAD_CAP` in `.env` first
-   if a bigger batch is wanted.
+2. Review the 9 drafted founder-outreach messages in the dashboard (approve/reject/regenerate).
+   **Double-check Aravind Jayendran's draft specifically** — it names his company "LatentGraph"
+   instead of the listed "LatentForce" (likely an ambiguous company-website search match), not
+   yet corrected. Re-run `POST /api/founders/import` with the same `Connections.csv` to process
+   the next batch of the remaining 167 flagged founders whenever ready — raise `DAILY_LEAD_CAP`
+   in `.env` first if a bigger batch is wanted.
 3. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
    the user wants that (currently off; manual trigger via `POST /api/discovery/run` still works).
