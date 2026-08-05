@@ -138,6 +138,12 @@ export const createApp = ({ store, pipeline, pipelineStore, discoveryRunner, fou
       const result = await founderOutreachRunner.run(founders);
       return sendJson(res, 200, { ok: true, result });
     }
+    const regenerateMatch = url.pathname.match(/^\/api\/founders\/([^/]+)\/regenerate$/);
+    if (req.method === 'POST' && regenerateMatch) {
+      if (!founderOutreachRunner) return sendJson(res, 503, { ok: false, error: 'founder outreach runner is unavailable' });
+      const item = await founderOutreachRunner.regenerateOne(decodeURIComponent(regenerateMatch[1]));
+      return sendJson(res, 200, { ok: true, item });
+    }
     if (req.method === 'GET' && url.pathname === '/api/usage') {
       const [firecrawl, apify] = await Promise.all([
         getFirecrawlUsage({ apiKey: firecrawlApiKey }),

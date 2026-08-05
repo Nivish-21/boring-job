@@ -138,9 +138,25 @@ const applyFilters = (cards) => {
   });
 };
 
+// Founder cards route "Regenerate" to a dedicated endpoint that actually redrafts (rejects the
+// stale item, reruns the founder pipeline, creates a fresh one) -- ReviewStore's own `decide()`
+// 'regenerate' action only flips status back to pending, it never touches draft content, so job
+// cards (which have no redraft path) keep using it unchanged.
 const decide = async (reviewItem, action, button) => {
-  const reason = action === 'reject' ? window.prompt('Optional rejection reason:') : null;
   button.disabled = true;
+  if (reviewItem.kind === 'founder' && action === 'regenerate') {
+    try {
+      const response = await fetch(`/api/founders/${encodeURIComponent(reviewItem.item_id)}/regenerate`, { method: 'POST' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Could not regenerate the draft');
+      await loadAll();
+    } catch (error) {
+      button.disabled = false;
+      window.alert(error.message);
+    }
+    return;
+  }
+  const reason = action === 'reject' ? window.prompt('Optional rejection reason:') : null;
   try {
     const response = await fetch(`/api/review/items/${reviewItem.id}/decision`, {
       method: 'POST',

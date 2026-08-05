@@ -594,3 +594,118 @@ against real data (LinkedIn CSV export + `POST /api/founders/import`), not more 
 **Do not re-derive the design above — read it, then continue directly from `server.mjs` wiring.**
 No new architectural decisions needed; this is mechanical continuation of an already-approved,
 already-substantially-built feature.
+
+## New task block: founder-outreach regenerate path + prompt/model hardening (2026-08-05) — DONE
+
+**Goal:** user reported the dashboard showed zero founder cards. Root cause was a stale Docker
+image (`worker/public/` is baked in at build time, never rebuilt after the standalone-cards fix
+landed 2026-08-04) — already fixed and verified this session (image rebuilt, served `app.js`
+byte-identical to source, `docker compose ps` healthy). Investigating further surfaced three real,
+separate problems that are the actual subject of this block:
+
+1. **5 of the 12 founder drafts are stuck bad, with no way to fix them.** 3 are genuinely empty
+   (`Thomas Marge`, `Vincent Y. Yang`, `Indranil Roy` — drafted during the since-fixed
+   `temperature: 0.4` window, `draft_error` recorded, `draft: null`). 2 still carry literal
+   unfilled placeholders (`Vibhav Gadwal`, `Kunal M` — drafted before the placeholder guard
+   existed). `docs/status.md` describes an "approve/reject/regenerate" flow, but **no regenerate
+   route exists** — `server.mjs` only has `POST /api/review/items/:id/decision` (approve/reject).
+   Worse, `FounderOutreachRunner.run()` marks a founder processed in `founder-store.json`
+   regardless of outcome, so re-running `/api/founders/import` silently skips these 5 forever as
+   "duplicate."
+2. **The prompt is measurably not being followed, with no backstop.** The system prompt already
+   explicitly bans generic-compliment openers and gives a labelled bad example
+   (`founder-outreach.mjs` lines 78-79), but live drafts still produce that exact pattern — e.g.
+   Jayaveeran Kayarohanam's draft opens "I've been following RevGate's journey and am impressed by
+   your innovative approach," nearly verbatim the prompt's own bad example. The existing
+   placeholder guard (`PLACEHOLDER_PATTERN`, line 16) proves prompt-only instructions aren't
+   reliable and a code-level backstop is needed — same principle should extend to banned
+   generic-opener phrasing, not just placeholders.
+3. **Model/reasoning-effort choice was never verified against the model's actual accepted
+   parameters** — the same class of bug as the `temperature: 0.4` incident. `gpt-5.6-terra`
+   rejecting non-default `temperature` is a strong signal it's a genuine reasoning-class model, on
+   which OpenAI's `reasoning_effort` param (`minimal`/`low`/`medium`/`high` depending on model,
+   confirmed live via web search against `developers.openai.com/api/docs/guides/reasoning`) may
+   apply — but this must be verified with a real API call against `gpt-5.6-terra` specifically
+   before wiring it in, not assumed from the model family name.
+
+**Steps — all done, completed 2026-08-05:**
+- [x] `founder-outreach.mjs`: `FounderOutreachRunner.regenerateOne(profileUrl)` — wraps the
+      existing private `#processFounder()` directly, reconstructs a founder-shaped input from the
+      stored `founder-store.json` record, rejects the old review item via `reviewStore.decide()`
+      before creating the new one. No store schema changes needed.
+- [x] `server.mjs`: new route `POST /api/founders/:profileUrl/regenerate`, 404 on unknown
+      profile_url, 503 when unwired.
+- [x] `worker/public/app.js`: the dashboard's "Regenerate" button already existed in
+      `index.html`/`styles.css` (built 2026-08-04) but called `ReviewStore.decide()`'s
+      `'regenerate'` action, which only flips status back to `pending` and never touches draft
+      content — a pre-existing dead end. `decide()` now routes founder-kind regenerate clicks to
+      the new endpoint; no new markup needed.
+- [x] `founder-outreach.mjs` prompt: explicit banned-phrase list added to the system prompt, plus
+      a matching code-level `GENERIC_OPENER_PATTERN` backstop.
+- [x] Empirically verified (real API call) that `gpt-5.6-terra` accepts `reasoning_effort`
+      (`none`/`low`/`medium`/`high`/`xhigh`); wired in `'high'`. Logged in `docs/decisions.md`.
+- [x] Regenerated all 5 known-bad drafts live via the new endpoint — all now clean (in the char
+      cap, no placeholders, no banned phrases, specific asks). Aravind Jayendran's
+      LatentForce/LatentGraph naming issue is a separate, still-unresolved known issue for human
+      review, correctly not auto-corrected by any of this.
+- [x] Tests: 10 new (`founder-outreach.test.mjs`: generic-opener guard, `reasoning_effort` in the
+      request body, `regenerateOne` happy path + unknown-profile-url; `server.test.mjs`: new route
+      success/404/503). 119/119 passing project-wide (up from 109).
+- [x] `docs/decisions.md`/`docs/changelog.md`/`docs/status.md` — logged; corrected the stale "9
+      processed" claim to the real 12 everywhere it appeared.
+- [x] Deployed: `docker compose build worker && docker compose up -d worker`, served `app.js`
+      re-verified byte-identical to source, container healthy.
+
+**Out of scope:** persisting `companyContext`/`matchedJob` to avoid re-scraping on regenerate —
+re-running the full per-founder path costs a few Firecrawl/OpenAI calls, acceptable for a
+human-triggered, low-volume regenerate action; not worth a schema change.
+
+**Block complete.** All steps done, deployed, and live-verified (not just unit-tested) — 5/5
+regenerated drafts confirmed clean via the real running API. Nothing left open in this block; the
+Aravind Jayendran naming mismatch remains a separate, tracked known issue (see `docs/status.md`
+"Next steps"), not part of this block's scope.
+
+## New task block: fix the 285-char limit — wrong LinkedIn product (2026-08-05) — DONE (expanded mid-execution to include voice matching, see below)
+
+**Goal:** the `MAX_MESSAGE_CHARS = 285` constant is based on LinkedIn's connection-request-note
+limit. Every founder this feature processes is already a 1st-degree connection (the feature only
+exists because it reads the user's own connections export), so the actual message sent is a
+regular direct message, not a connection-request note. **User caught this, correctly** — a real
+design mistake, not a preference tweak. Verified live (web search, multiple independent sources —
+LeadLoft, LaGrowthMachine, LinkedFusion): connection-request notes cap at 300 chars, regular
+messages to existing 1st-degree connections cap at ~8,000 chars.
+
+**User's direction (asked, not assumed):** no fixed target length — let the model decide per
+founder based on how much real content there is to say, with the 8,000-char figure as a hard
+safety backstop in code only, not a target the prompt aims for.
+
+**Steps — all done:**
+- [x] `founder-outreach.mjs`: `MAX_MESSAGE_CHARS` → `8_000`, comment updated (safety backstop,
+      not a style target).
+- [x] System prompt rewritten: no fixed length target, "write however long it needs to be,"
+      updated good/bad examples.
+- [x] `truncateToWordBoundary` kept as the code-level backstop at the new 8,000-char ceiling.
+- [x] Tests updated: the two 285-specific tests now target 8,000; added a case confirming a
+      genuinely substantive ~800-char message is untouched.
+- [x] Regenerated all 12 pending founder drafts via `regenerateOne`.
+- [x] `docs/decisions.md`/`docs/changelog.md`/`docs/status.md` — logged.
+
+**Expanded mid-execution (user feedback after seeing the first regenerate pass):** drafts still
+read as AI-written despite passing every guard — repeated template opener, em dashes. User
+provided one real writing sample live in conversation (no saved samples existed). Extracted
+concrete style markers (casual opener, "and"-chained sentences, no em dashes, low-key ask), added
+as `USER_VOICE_SAMPLE` prompt reference (structure/tone only, same framing as resume
+`reference_text`), added `EM_DASH_PATTERN` code-level guard, rewrote hard rules and both examples
+to match, regenerated all 12 a second time. Along the way, investigated (not assumed) an
+apparent-hallucination in Aravind Jayendran's draft — "Cabocab" confirmed real via `grep` against
+the actual resume files; "LatentForce" vs. "LatentGraph" confirmed NOT an error via a live
+Firecrawl scrape of the real company site (LatentForce = company, LatentGraph = their actual
+product) — closed a known-issue that had been open since 2026-08-04 without ever being a real bug.
+Final state: all 12 pass every guard (placeholder, generic-opener, em dash) with zero flags.
+
+**Out of scope:** InMail (LinkedIn's paid messaging product for non-connections) — not applicable
+here since every processed founder is already a connection; not building any InMail-specific path.
+
+**Block complete.** Both the character-limit fix and the voice-matching follow-on are done,
+tested (121/121 passing), deployed, and live-verified against the real running API — all 12
+founder drafts regenerated and manually reviewed for quality, guard compliance, and grounding.

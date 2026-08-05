@@ -363,3 +363,86 @@ grounding/correctness issue for human review to catch, not a prompt-quality one.
 **Operational note:** the real (git-ignored, PII) `Connections.csv` used for both live runs lives
 at `worker/founder-outreach/import.zip/Connections.csv` — a local scratch location, never
 committed.
+
+## 2026-08-05 — Rotated exposed secrets
+
+Rotated `OPENAI_API_KEY`, `APIFY_API_TOKEN`, `FIRECRAWL_API_KEY` following the 2026-08-04
+transcript exposure (logged in `~/.claude/lessons.md`). User regenerated each key in its
+provider dashboard and updated `.env` directly (values never re-entered into the conversation).
+`worker` container recreated (`docker compose up -d --force-recreate worker`) and confirmed
+healthy with 0 log errors on boot. No code changes.
+
+## 2026-08-05 — Fixed stale dashboard image; founder-outreach regenerate path + prompt/model hardening
+
+**Root cause of "dashboard shows zero founder cards":** `worker/public/` is baked into the Docker
+image at build time; the running image (built 2026-08-04) predated the standalone-cards fix that
+renders `kind: 'founder'` review items. `docker compose build worker` + recreate fixed it —
+verified by diffing the container's served `app.js` byte-for-byte against source.
+
+**Investigating further surfaced three real, separate problems, all fixed this session:**
+
+1. **No way to fix a bad draft.** 5 of 12 processed founders were stuck with unusable drafts (3
+   genuinely empty from the since-fixed `temperature: 0.4` bug; 2 with leftover bracketed
+   placeholders from before the placeholder guard existed) and no regenerate mechanism existed —
+   `FounderOutreachRunner.run()` marks a founder processed regardless of outcome, so re-running
+   import silently skipped all 5 forever.
+   - **Added:** `FounderOutreachRunner.regenerateOne(profileUrl)` (`worker/src/
+     founder-outreach.mjs`) — reconstructs a founder-shaped object from the stored
+     `founder-store.json` record, rejects the stale review item via `ReviewStore.decide()`, reruns
+     the existing per-founder pipeline directly, upserts the founder record.
+   - **Added:** `POST /api/founders/:profileUrl/regenerate` route in `server.mjs`.
+   - **Fixed:** the dashboard's "Regenerate" button already existed in `index.html` but called
+     `ReviewStore.decide()`'s `'regenerate'` action, which only flips status back to `pending` and
+     never touches draft content — a dead end. `app.js`'s `decide()` now routes founder-kind
+     regenerate clicks to the new endpoint instead; job cards are unaffected.
+   - Regenerated all 5 stuck drafts live: all now under the 285-char cap, no placeholders, no
+     banned phrases, real specific asks. Verified via the live API, not assumed.
+2. **Prompt not reliably followed, no backstop.** Live drafts kept reproducing the prompt's own
+   labelled bad-example phrasing (generic compliment openers) almost verbatim. Added a
+   `GENERIC_OPENER_PATTERN` code-level guard (mirrors the existing placeholder guard) plus an
+   explicit banned-phrase list in the system prompt.
+3. **Model/effort verified empirically, not assumed** (same discipline that caught the earlier
+   `temperature` bug): confirmed live against the real OpenAI API that `gpt-5.6-terra` accepts
+   `reasoning_effort` (`none`/`low`/`medium`/`high`/`xhigh`) and that `'high'` produces genuine
+   reasoning-token spend and better output. Wired in. Full reasoning in `docs/decisions.md`.
+
+**Tests:** 10 new (`founder-outreach.test.mjs`: generic-opener guard, `reasoning_effort` in the
+request body, `regenerateOne` happy path + unknown-profile-url error; `server.test.mjs`: new
+route success/404/503). 119/119 passing project-wide (up from 109).
+
+**Also corrected:** `docs/status.md`'s "9 founders processed" was stale — the real number is 12
+(confirmed from `founders.json` timestamps: 4 batches of 3 across 2026-08-04, not the "3 then 6"
+narrative previously written).
+
+## 2026-08-05 — Fixed the wrong character limit, matched drafting voice to the user's real writing
+
+**Wrong limit fixed:** `MAX_MESSAGE_CHARS` was 285, based on LinkedIn's connection-request-note
+limit (300 chars) — the wrong product. Every founder this feature processes is already a
+1st-degree connection, so the real message sent is a regular DM, capped at ~8,000 chars (verified
+live against multiple sources), not a connection-request note. User caught this directly. Changed
+`MAX_MESSAGE_CHARS` to `8_000` as a safety backstop only, per the user's explicit direction: no
+fixed target length, let the model decide per founder.
+
+**Voice matched to a real sample:** user flagged the regenerated drafts still read as AI-written
+(repeated template opener, occasional em dashes) even though they passed every existing guard.
+Added `USER_VOICE_SAMPLE` (a real example the user gave live in conversation) to the system prompt
+as a tone/cadence reference, rewrote the hard rules and both examples to match that casual,
+run-on-sentence, low-key-ask style, and added a code-level `EM_DASH_PATTERN` guard (mirrors the
+placeholder/generic-opener guards).
+
+**Closed a stale known-issue:** Aravind Jayendran's regenerated draft initially looked like a
+fresh problem — a specific personal claim ("Cabocab," a ride-hailing platform) and an inconsistent
+company name ("LatentForce" vs. "LatentGraph" in the same message). Investigated rather than
+assumed: "Cabocab" is real, from the user's own resume reference text. The name "inconsistency"
+isn't one either — a live Firecrawl scrape of the real company site confirmed LatentForce is the
+company and LatentGraph is their actual flagship product (npm package
+`@latentforce/latentgraph`). **The "Aravind Jayendran naming mismatch," carried as an open known
+issue since 2026-08-04, was never actually a bug** — closed.
+
+**Regenerated all 12 pending drafts twice** this session (once for the character-limit fix, once
+for the voice match) via the `regenerateOne` endpoint built last session. Final state: all 12 pass
+every guard (placeholder, generic-opener, em dash) with zero flags, average length ~280-500 chars
+(up from ~170-330 chars under the old terse-connection-note style).
+
+**Tests:** 4 new (`founder-outreach.test.mjs`: 8,000-char truncation backstop, untouched
+substantive ~800-char message, em-dash guard). 121/121 passing project-wide (up from 119).

@@ -234,6 +234,58 @@ test('returns 503 from the founder-import endpoint when no founder outreach runn
   }
 });
 
+test('runs the founder-regenerate endpoint through the injected runner', async () => {
+  const store = { list: async () => [] };
+  let receivedProfileUrl = null;
+  const founderOutreachRunner = {
+    regenerateOne: async (profileUrl) => { receivedProfileUrl = profileUrl; return { id: 'review-2', draft: 'Hi Jane, ...' }; }
+  };
+  const server = await start({ store, founderOutreachRunner, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const response = await call(server, {
+      method: 'POST',
+      path: `/api/founders/${encodeURIComponent('https://www.linkedin.com/in/jane')}/regenerate`
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { ok: true, item: { id: 'review-2', draft: 'Hi Jane, ...' } });
+    assert.equal(receivedProfileUrl, 'https://www.linkedin.com/in/jane');
+  } finally {
+    await close(server);
+  }
+});
+
+test('returns 404 from the founder-regenerate endpoint for an unknown profile_url', async () => {
+  const store = { list: async () => [] };
+  const founderOutreachRunner = { regenerateOne: async () => { throw new Error('founder not found for this profile_url'); } };
+  const server = await start({ store, founderOutreachRunner, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const response = await call(server, {
+      method: 'POST',
+      path: `/api/founders/${encodeURIComponent('https://www.linkedin.com/in/unknown')}/regenerate`
+    });
+    assert.equal(response.status, 404);
+  } finally {
+    await close(server);
+  }
+});
+
+test('returns 503 from the founder-regenerate endpoint when no founder outreach runner is configured', async () => {
+  const store = { list: async () => [] };
+  const server = await start({ store, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const response = await call(server, {
+      method: 'POST',
+      path: `/api/founders/${encodeURIComponent('https://www.linkedin.com/in/jane')}/regenerate`
+    });
+    assert.equal(response.status, 503);
+  } finally {
+    await close(server);
+  }
+});
+
 test('returns firecrawl/apify usage errors without either key configured, with no network call', async () => {
   const store = { list: async () => [] };
   const server = await start({ store, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });

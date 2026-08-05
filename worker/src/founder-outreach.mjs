@@ -7,13 +7,30 @@ const API_URL = 'https://api.openai.com/v1/chat/completions';
 // live: the cheaper tier left a literal "[specific area related to tech]" in a real draft).
 const DEFAULT_MODEL = 'gpt-5.6-terra';
 const requestTimeoutMs = 30_000;
-// LinkedIn caps a connection-note-style message at 300 characters; 285 leaves headroom so a
-// draft never lands right at the platform's hard wall.
-const MAX_MESSAGE_CHARS = 285;
+// Every founder this feature processes is already a 1st-degree LinkedIn connection (the feature
+// only exists because it reads the user's own connections export), so the actual message sent is
+// a regular direct message, not a connection-request note -- those are different LinkedIn
+// products with different limits (300 chars for a connection-request note vs ~8,000 for a regular
+// DM to an existing connection, verified live against multiple independent sources). This is a
+// safety backstop against a runaway response, not a style target -- the prompt does not aim for
+// this length.
+const MAX_MESSAGE_CHARS = 8_000;
 // Backstop for the "never leave a placeholder" prompt rule -- catches it in code rather than
 // trusting the model to always follow a negative instruction (same principle as fit-evaluator
 // .mjs nulling out a hallucinated bucket_id instead of trusting it blindly).
 const PLACEHOLDER_PATTERN = /\[[^\]]+\]/;
+// Same principle, different failure mode: live drafts kept reproducing the prompt's own labelled
+// bad-example phrasing almost verbatim (generic compliment openers) despite an explicit prompt
+// rule against it -- prompt-only instructions aren't reliable here either.
+const GENERIC_OPENER_PATTERN = /impressed by|innovative approach|following your journey|reaching out because|hope this message finds you well/i;
+// Same principle again: an em dash is one of the clearest AI-writing tells and the user's real
+// voice (see USER_VOICE_SAMPLE) never uses one -- caught in code since a prompt rule alone isn't
+// reliably followed (same lesson as the two guards above).
+const EM_DASH_PATTERN = /—/;
+// A real sample of how the candidate actually writes, given by the user directly (not invented) --
+// used in the prompt as a tone/cadence reference only, never copied verbatim unless a founder's
+// situation genuinely matches it.
+const USER_VOICE_SAMPLE = "Hey there, I just saw this new company and I've been doing something similar. I also run a ride-hailing platform. We found a couple of bloggers here and this is how I solved it and I think I could do the same for you guys too. Would be happy to join a call whenever you're free.";
 
 const isAtsBoardUrl = (url) => {
   try { return selectProvider(url).provider !== 'manual'; } catch { return false; }
@@ -63,20 +80,26 @@ const buildMessages = ({ founder, companyContext, matchedJob, resumeBucket }) =>
   return [
     {
       role: 'system',
-      content: `You draft a short, specific, professional cold-outreach message from a job-seeking candidate to a founder they are already connected with on LinkedIn.
+      content: `You draft a warm, casual, genuinely human-sounding direct message from a job-seeking candidate to a founder who is already a 1st-degree LinkedIn connection of theirs -- this is a regular direct message, NOT a connection-request note, so there is no tight platform character wall to write around.
+
+Voice reference -- a real example of how the candidate actually writes. Match its tone and sentence rhythm, but NEVER copy its specific content unless it happens to be genuinely true for the founder being messaged: "${USER_VOICE_SAMPLE}"
+
+Match that voice specifically: a casual opener (not "Hi [Name], I hope..."), run-on sentences chained together with "and" rather than clipped, over-polished corporate sentences, a real personal angle leading the message when one genuinely exists, and a low-key, easygoing ask at the end (e.g. "happy to hop on a call whenever works for you" -- not "would you be open to a 15-minute conversation next week").
 
 Hard rules:
-- The message MUST be under ${MAX_MESSAGE_CHARS} characters total, including spaces -- this is a hard platform limit, not a suggestion. Write tight from the start; do not pad it and expect truncation to fix it.
-- Never use generic filler openers like "I hope this message finds you well" or "I've been following your journey".
+- Never use an em dash anywhere in the message -- it's one of the clearest tells of AI-written text and the candidate never writes that way.
+- Do not open with "I noticed you're building/leading [Company] as [Title] and wanted to introduce myself" or any close variant of it -- vary the opening structure between messages the way a real person naturally would, never a repeated template.
+- There is no fixed length target. Write however long it needs to be to be specific and genuine -- usually a short paragraph or two. Never pad with filler just to fill space, and never cut a real, specific point short just to sound punchy.
+- Never use these banned phrases or close variants of them: "I hope this message finds you well", "I've been following your journey", "impressed by", "innovative approach", "reaching out because".
 - Never invent a fact not given in the prompt, and never leave a bracketed placeholder like "[your area of expertise]" -- if there is no specific real detail to use, omit that clause instead of guessing.
 - Lead with one specific, concrete reason for reaching out (the open role if given, or a real detail from the company context) -- not a compliment.
-- End with a single, low-friction, specific ask -- not just "let's connect".
+- End with a single, low-friction, casual ask -- not just "let's connect".
 
-Good example (specific, tight, no filler), 178 characters:
-"Hi Raj, saw Nimbus is hiring a Senior Backend Engineer. I've spent 4 years building production Node/Python APIs at scale -- open to a 15-min chat about the role this week?"
+Good example (matches the voice reference's casual, run-on style, specific, no filler):
+"Hey Raj, saw Nimbus is hiring a Senior Backend Engineer and that's basically what I've been doing for the last 4 years, building production Node/Python APIs at scale and most recently leading a rewrite of a payments service that cut p99 latency by about 40%. Would love to hear more about what the role actually looks like day to day, happy to jump on a call whenever works for you."
 
-Bad example, do NOT write like this -- generic opener, vague compliment, placeholder, weak ask:
-"Hi Raj, I hope this message finds you well! I've been following Nimbus's journey and am really impressed by your innovative approach. I have experience in [relevant area] and would love to explore potential synergies. Looking forward to connecting!"
+Bad example, do NOT write like this -- formulaic template opener, stiff corporate cadence, weak ask:
+"Hi Raj, I noticed you're leading Nimbus as CEO and wanted to introduce myself. I'd be interested in hearing how you're thinking about the company's priorities. Would you be open to a 15-minute conversation next week?"
 
 Respond with JSON only: {"message": string, "reason": string}.`
     },
@@ -114,7 +137,12 @@ export const draftOutreachMessage = async ({ founder, companyContext, matchedJob
         // (verified live: "Only the default (1) value is supported") -- omit it rather than
         // pin a value that only worked for the older gpt-4o-mini default.
         messages: buildMessages({ founder, companyContext, matchedJob, resumeBucket }),
-        response_format: { type: 'json_object' }
+        response_format: { type: 'json_object' },
+        // Verified live against the real API (not assumed from the model family name): gpt-5.6-
+        // terra accepts reasoning_effort ('none'/'low'/'medium'/'high'/'xhigh'); 'high' spends
+        // real reasoning tokens and measurably improves adherence to the tight constraints here
+        // (char cap, no filler, no placeholders). Cost is trivial at this feature's volume.
+        reasoning_effort: 'high'
       }),
       signal: controller.signal
     });
@@ -131,6 +159,12 @@ export const draftOutreachMessage = async ({ founder, companyContext, matchedJob
     let reason = typeof parsed.reason === 'string' ? parsed.reason : '';
     if (message && PLACEHOLDER_PATTERN.test(message)) {
       return { message: null, reason: 'Model left a bracketed placeholder in the draft -- needs regeneration' };
+    }
+    if (message && EM_DASH_PATTERN.test(message)) {
+      return { message: null, reason: 'Model used an em dash -- needs regeneration' };
+    }
+    if (message && GENERIC_OPENER_PATTERN.test(message)) {
+      return { message: null, reason: 'Model used a banned generic-opener phrase -- needs regeneration' };
     }
     if (message && message.length > MAX_MESSAGE_CHARS) {
       message = truncateToWordBoundary(message, MAX_MESSAGE_CHARS);
@@ -172,6 +206,43 @@ export class FounderOutreachRunner {
     }
 
     return { processed, stage_counts: stageCounts };
+  }
+
+  // Redrafts a single already-processed founder -- for a stuck/bad review item (empty draft from
+  // a transient API failure, a placeholder that predates the guard, etc). Bypasses run()'s
+  // dedup/cap checks entirely (they exist to protect the daily import, not a targeted single-item
+  // retry). Reconstructs a founder-shaped object from the stored founderStore record rather than
+  // persisting a second copy of the original CSV row -- lossy only for a multi-word first name,
+  // an accepted tradeoff for a low-volume, human-triggered action.
+  async regenerateOne(profileUrl) {
+    const existing = await this.founderStore.getByProfileUrl(profileUrl);
+    if (!existing) throw new Error('founder not found for this profile_url');
+
+    if (existing.review_item_id) {
+      const items = await this.reviewStore.list({});
+      const oldItem = items.find((item) => item.id === existing.review_item_id);
+      if (oldItem && oldItem.status === 'pending') {
+        await this.reviewStore.decide(oldItem.id, {
+          action: 'reject',
+          approval_id: oldItem.approval_id,
+          actor: 'system',
+          reason: 'Superseded by regenerated draft'
+        });
+      }
+    }
+
+    const [firstName, ...rest] = existing.name.split(' ');
+    await this.#processFounder({
+      first_name: firstName || '',
+      last_name: rest.join(' '),
+      company: existing.company,
+      position: existing.position,
+      profile_url: existing.profile_url
+    });
+
+    const updated = await this.founderStore.getByProfileUrl(profileUrl);
+    const items = await this.reviewStore.list({});
+    return items.find((item) => item.id === updated.review_item_id) || null;
   }
 
   async #processFounder(founder) {

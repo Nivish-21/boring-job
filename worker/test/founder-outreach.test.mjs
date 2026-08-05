@@ -70,6 +70,36 @@ test('draftOutreachMessage nulls out a message that still contains a bracketed p
   assert.match(result.reason, /placeholder/);
 });
 
+test('draftOutreachMessage nulls out a message that uses a banned generic-opener phrase', async () => {
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({ message: "Hi Jane, I've been following your journey and am really impressed by your innovative approach.", reason: 'Generic outreach' })
+  });
+  assert.equal(result.message, null);
+  assert.match(result.reason, /banned generic-opener phrase/);
+});
+
+test('draftOutreachMessage nulls out a message that uses an em dash', async () => {
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({ message: 'Hi Jane — saw Nimbus is hiring, would love to chat.', reason: 'Generic outreach' })
+  });
+  assert.equal(result.message, null);
+  assert.match(result.reason, /em dash/);
+});
+
+test('draftOutreachMessage sends reasoning_effort: high in the request body', async () => {
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: async (url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(body.reasoning_effort, 'high');
+      return chatResponse({ message: 'Hi Jane, ...', reason: 'Generic value-add message' })(url, init);
+    }
+  });
+  assert.equal(result.message, 'Hi Jane, ...');
+});
+
 test('draftOutreachMessage degrades to message null without throwing when the API key is missing', async () => {
   const result = await draftOutreachMessage({ founder }, { fetchImpl: async () => new Response('{}') });
   assert.equal(result.message, null);
@@ -100,19 +130,29 @@ test('draftOutreachMessage degrades to message null without throwing on a reques
   assert.equal(result.reason, 'OpenAI request timed out');
 });
 
-test('draftOutreachMessage truncates an over-length message to 285 chars at a word boundary', async () => {
-  const longMessage = 'This is a very long outreach message that keeps going and going far past the platform limit '.repeat(4).trim();
+test('draftOutreachMessage truncates a runaway-length message to 8,000 chars at a word boundary', async () => {
+  const longMessage = 'This is a very long outreach message that keeps going and going far past any reasonable length '.repeat(90).trim();
   const result = await draftOutreachMessage({ founder }, {
     apiKey: 'sk-test',
     fetchImpl: chatResponse({ message: longMessage, reason: 'Generic outreach' })
   });
-  assert.ok(result.message.length <= 285);
+  assert.ok(result.message.length <= 8_000);
   assert.notEqual(result.message.at(-1), ' ');
   assert.ok(longMessage.startsWith(result.message));
-  assert.match(result.reason, /truncated to fit the 285-character limit/);
+  assert.match(result.reason, /truncated to fit the 8000-character limit/);
 });
 
-test('draftOutreachMessage leaves a message at or under 285 chars untouched', async () => {
+test('draftOutreachMessage leaves a genuinely substantive ~800-char message untouched -- no artificial short cap remains', async () => {
+  const substantiveMessage = 'Hi Jane, saw Nimbus is hiring a Senior Backend Engineer -- that caught my eye since I have spent the last 4 years building production Node and Python APIs at scale, most recently leading a rewrite of a payments service that cut p99 latency by roughly 40 percent under real production load. I would genuinely enjoy hearing more about what the role actually involves day to day, and specifically where the team feels its biggest technical bottleneck is right now, since that is usually the most useful thing to understand before a first conversation. Would you have 15 to 20 minutes this week for a call, or would a short set of async questions work better for your schedule instead?';
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({ message: substantiveMessage, reason: 'Role-specific outreach' })
+  });
+  assert.equal(result.message, substantiveMessage);
+  assert.equal(result.reason, 'Role-specific outreach');
+});
+
+test('draftOutreachMessage leaves a message at or under 8,000 chars untouched', async () => {
   const shortMessage = 'Hi Jane, saw Nimbus is hiring a backend engineer -- I have shipped production Node/Python systems and would love to chat about the role.';
   const result = await draftOutreachMessage({ founder }, {
     apiKey: 'sk-test',
@@ -133,7 +173,23 @@ const fakeFounderStore = () => {
 
 const fakeReviewStore = () => {
   const created = [];
-  return { created, async create(input) { const item = { id: `review-${created.length + 1}`, ...input }; created.push(item); return item; } };
+  return {
+    created,
+    async create(input) {
+      const item = { id: `review-${created.length + 1}`, approval_id: `approval-${created.length + 1}`, status: 'pending', decisions: [], ...input };
+      created.push(item);
+      return item;
+    },
+    async list() { return created; },
+    async decide(id, input) {
+      const item = created.find((entry) => entry.id === id);
+      if (!item) throw new Error('review item not found');
+      if (item.approval_id !== input.approval_id) throw new Error('approval_id does not match this review item');
+      item.status = input.action === 'approve' ? 'approved' : input.action === 'regenerate' ? 'pending' : 'rejected';
+      item.decisions.push({ action: input.action, reason: input.reason, actor: input.actor });
+      return item;
+    }
+  };
 };
 
 test('run skips founders with a non-http profile_url', async () => {
@@ -237,4 +293,43 @@ test('run always creates a review item and records the founder, even when drafti
   const recorded = await founderStore.getByProfileUrl('https://www.linkedin.com/in/jane');
   assert.equal(recorded.draft_error, 'OpenAI API key is not configured');
   assert.equal(recorded.review_item_id, 'review-1');
+});
+
+test('regenerateOne rejects the stale review item and creates a fresh one with a new draft', async () => {
+  const founderStore = fakeFounderStore();
+  const reviewStore = fakeReviewStore();
+  let draftCallCount = 0;
+  const runner = new FounderOutreachRunner({
+    founderStore,
+    reviewStore,
+    pipeline: { process: async () => ({ stage: 'skipped' }) },
+    lookupCompany: async () => ({ website_url: null, linkedin_url: null }),
+    findCareers: async () => [],
+    draftMessage: async () => {
+      draftCallCount += 1;
+      return draftCallCount === 1
+        ? { message: 'Hi Vibhav, I have experience in [relevant area].', reason: 'Bad first draft' }
+        : { message: 'Hi Vibhav, saw Playroot Golf is expanding -- worth a 15-min chat?', reason: 'Regenerated draft' };
+    }
+  });
+
+  await runner.run([{ profile_url: 'https://www.linkedin.com/in/vibhav', first_name: 'Vibhav', last_name: 'Gadwal', company: 'Playroot Golf' }]);
+  assert.equal(reviewStore.created.length, 1);
+  const originalItemId = reviewStore.created[0].id;
+
+  const regenerated = await runner.regenerateOne('https://www.linkedin.com/in/vibhav');
+
+  assert.equal(reviewStore.created[reviewStore.created.findIndex((item) => item.id === originalItemId)].status, 'rejected');
+  assert.equal(reviewStore.created.find((item) => item.id === originalItemId).decisions.at(-1).reason, 'Superseded by regenerated draft');
+  assert.equal(reviewStore.created.length, 2);
+  assert.equal(regenerated.draft, 'Hi Vibhav, saw Playroot Golf is expanding -- worth a 15-min chat?');
+
+  const recorded = await founderStore.getByProfileUrl('https://www.linkedin.com/in/vibhav');
+  assert.equal(recorded.review_item_id, regenerated.id);
+  assert.notEqual(recorded.review_item_id, originalItemId);
+});
+
+test('regenerateOne throws when no founder record exists for the profile_url', async () => {
+  const runner = new FounderOutreachRunner({ founderStore: fakeFounderStore(), reviewStore: fakeReviewStore() });
+  await assert.rejects(() => runner.regenerateOne('https://www.linkedin.com/in/unknown'), /founder not found/);
 });

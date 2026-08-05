@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: 2026-08-04_
+_Last updated: 2026-08-05_
 
 ## Current state
 
@@ -13,61 +13,63 @@ each card showing an explicit "Discovered" timestamp and colour-coded fit score)
 job ever seen, plus a Firecrawl/Apify usage strip. Discovery targets ATS-hosted boards directly
 (Greenhouse/Lever/Ashby). Packet drafts include a capped excerpt of the matched resume's real
 extracted text (kept outside git, in `~/Desktop/Nivish_Tailored_Resumes/reference/`).
-A **founder-outreach feature** is now built, unit-tested, and **live-verified against real
-data**: imports a LinkedIn connections CSV (official export, no scraping), identifies founders,
-researches their companies, checks for a real open role through the unmodified job pipeline, and
-drafts a personalized outreach message for human review — never auto-sends. First real batch (3
-founders, capped) ran successfully against the user's actual 576-connection export; see "Active
-plan" below for results and an outstanding key-rotation item. `OPENAI_API_KEY` is now supplied,
-and founder-outreach drafting uses `gpt-5.6-terra` (mid-tier, not the cheapest) specifically for
-message quality. 112/112 tests passing; `docker compose config --quiet` validates clean.
+A **founder-outreach feature** is built, unit-tested, and **live-verified against real data**:
+imports a LinkedIn connections CSV (official export, no scraping), identifies founders, researches
+their companies, checks for a real open role through the unmodified job pipeline, drafts a
+personalized outreach message for human review (never auto-sends), and supports **regenerating a
+single bad draft** without re-importing the whole batch. `OPENAI_API_KEY` is supplied and
+founder-outreach drafting uses `gpt-5.6-terra` (mid-tier) with `reasoning_effort: 'high'` (verified
+live against the real API, not assumed). Drafts are direct messages to existing 1st-degree
+connections (no fixed length target, ~8,000-char safety backstop only — not the 300-char
+connection-request-note limit, a mistake caught and fixed 2026-08-05) and match a real voice
+sample the user provided, with code-level guards against placeholders, banned generic-opener
+phrases, and em dashes. 121/121 tests passing; `docker compose config --quiet` validates clean.
 
-## Active plan — founder-outreach: LIVE-VERIFIED, then a quality-fix pass, also LIVE-VERIFIED (2026-08-04)
+## Active plan — founder-outreach: dashboard fixed, regenerate path built, char-limit fixed, voice matched — all live-verified (2026-08-05)
 
-First real run (3 founders, capped): imported the user's actual LinkedIn `Connections.csv` (576
-connections, 176 flagged as founders) via `POST /api/founders/import`. All 3 processed, all 3 got
-a real OpenAI-drafted message, confirmed rendering correctly in the real dashboard. User then
-flagged the messages as weak and asked for a hard 300-char-adjacent cap (LinkedIn's connection-
-note limit). Fixed and **re-verified live against 6 more real founders** (9 total processed of
-176 flagged; 167 remain, untouched — re-running the import picks up the next batch automatically,
-already-processed founders are skipped): switched the drafting model to `gpt-5.6-terra`, added a
-hard 285-char code-level truncation backstop, added a code-level guard that nulls out any message
-still containing a bracketed placeholder, rewrote the prompt with explicit banned phrases and a
-paired good/bad example. Full reasoning and both live-verification passes in `docs/decisions.md`.
+**12 founders processed so far** (not 9 — that count was stale in an earlier version of this doc;
+corrected from the real `founders.json` timestamps: 4 batches of 3 across 2026-08-04) of 176
+flagged from the user's 576-connection export. 164 remain, untouched — re-running
+`POST /api/founders/import` against the same CSV picks up the next batch automatically
+(already-processed founders are skipped).
 
-**Real-data observations from the live checks, not code bugs:**
-- Some founders' companies have no discoverable website/LinkedIn/open role (small/early startups
-  with thin web presence) — those get a shorter, generic value-add message. Expected.
-- One drafted message named a founder's company differently than the name on record (likely an
-  ambiguous company-website search match) — flagged to the user for manual review, not silently
-  "fixed," since it's a grounding/correctness issue the human-review step exists to catch.
-- The model-switch live check also caught a real bug the unit tests couldn't have: `gpt-5.6-terra`
-  rejects any non-default `temperature`, so the first post-switch live batch silently drafted
-  nothing (degraded gracefully, but zero real output) until the hardcoded `temperature: 0.4`
-  (left over from the `gpt-4o-mini` era) was removed.
+**This session (2026-08-05), first pass:** user reported the dashboard showed zero founder cards.
+Root cause: `worker/public/` is baked into the Docker image at build time, and the image hadn't
+been rebuilt since the fix that renders `kind: 'founder'` review items landed on 2026-08-04.
+Rebuilt and verified (served `app.js` byte-identical to source). Investigating further surfaced
+three real problems, all fixed and live-verified: (1) 5 of the 12 processed founders were stuck
+with unusable drafts (3 genuinely empty from the `temperature: 0.4` bug, 2 with leftover
+placeholders predating the guard) with no way to fix them — built `regenerateOne(profileUrl)` +
+`POST /api/founders/:profileUrl/regenerate` + wired the dashboard's existing (previously dead-end)
+"Regenerate" button to it; (2) added a `GENERIC_OPENER_PATTERN` guard, live drafts kept
+reproducing the prompt's own labelled bad-example phrasing; (3) verified live that `gpt-5.6-terra`
+accepts `reasoning_effort` and wired in `'high'`.
 
-**Security incident during this run (logged in full in `~/.claude/lessons.md` and
-`docs/lessons.md`):** a `grep` on `.env` intended to just confirm which vars were set instead
-printed real secret values into the conversation — `OPENAI_API_KEY`, `APIFY_API_TOKEN`,
-`FIRECRAWL_API_KEY` (live), plus `N8N_ENCRYPTION_KEY`/`POSTGRES_PASSWORD` (decommissioned
-services). User chose to proceed with the test import rather than rotate first. **Still
-outstanding: rotate `FIRECRAWL_API_KEY`, `APIFY_API_TOKEN`, and `OPENAI_API_KEY`** — regenerate
-in each provider's dashboard, update `.env`, no code changes needed.
+**Second pass, same session:** user pointed out the drafts still weren't right — a 285-char cap
+based on LinkedIn's connection-request-note limit, applied to messages that actually go to
+existing 1st-degree connections (a regular DM, ~8,000-char limit). Fixed: `MAX_MESSAGE_CHARS` →
+`8_000` as a safety backstop only, no fixed target (user's explicit direction), prompt rewritten
+accordingly. User then flagged the regenerated drafts still read as AI-written despite passing
+every guard — provided one real writing sample live in conversation, from which concrete style
+markers were extracted (casual opener, "and"-chained sentences, no em dashes, a low-key ask) and
+added to the prompt as a voice reference, plus a new code-level `EM_DASH_PATTERN` guard. All 12
+drafts regenerated twice this session (once per fix); final state: all pass every guard with zero
+flags, average length ~280-500 chars.
+
+**Resolved, not just "not a code bug":** what had been carried since 2026-08-04 as an open
+known-issue (Aravind Jayendran's draft naming his company "LatentGraph" vs. the listed
+"LatentForce") turned out, on investigation via a live Firecrawl scrape of the real company site,
+to not be an error at all — LatentForce is the company, LatentGraph is their actual flagship
+product. Closed.
 
 **Real `Connections.csv` lives at `worker/founder-outreach/import.zip/Connections.csv`**
 (git-ignored — the folder holds the user's full LinkedIn data-archive export, real PII, never
-committed). 9 of 176 flagged founders processed so far; re-running `POST /api/founders/import`
-against that same file picks up the next batch of the remaining 167 automatically
-(already-processed ones are skipped).
+committed).
 
-**Explicit instruction for next session:** founder-outreach is fully working end-to-end against
-real data — do not re-derive the architecture or ask setup questions already answered. Open by
-checking, in order: (1) has `FIRECRAWL_API_KEY`/`APIFY_API_TOKEN`/`OPENAI_API_KEY` been rotated
-yet (grep `.env` for presence only, never print values — see the security-incident note above);
-(2) has the user reviewed/decided on the 9 pending founder drafts in the dashboard, especially
-the Aravind Jayendran/LatentForce-vs-LatentGraph one; (3) whether they want the next batch of the
-remaining 167 flagged founders imported. Do not ask for the CSV — it already exists at
-`worker/founder-outreach/import.zip/Connections.csv`.
+**Explicit instruction for next session:** founder-outreach (including regenerate, the corrected
+char limit, and the voice-matched prompt) is fully working end-to-end against real data — do not
+re-derive the architecture. Open by checking whether the user wants the next batch of the
+remaining 164 flagged founders imported.
 
 `DISCOVERY_SCHEDULE_ENABLED` is still off by default for the existing job-discovery pipeline —
 turn on when the user wants real unattended daily runs.
@@ -115,6 +117,28 @@ See `docs/decisions.md` for full reasoning. Summary:
   calls (`fit-evaluator.mjs`) don't and are unaffected. Hard 285-char cap and a bracketed-
   placeholder guard are both enforced in code, not just requested in the prompt — live
   verification showed prompt-only instructions aren't reliably followed.
+- `reasoning_effort: 'high'` added to `draftOutreachMessage`'s OpenAI call, verified live against
+  the real API (accepted values, real reasoning-token spend) before wiring in, not assumed from
+  the model family name — same discipline that caught the earlier `temperature` bug.
+- A second code-level guard (`GENERIC_OPENER_PATTERN`) added alongside the placeholder guard —
+  live drafts kept reproducing the prompt's own labelled bad-example phrasing almost verbatim,
+  reconfirming prompt-only instructions aren't reliable for this model/task.
+- `FounderOutreachRunner.regenerateOne(profileUrl)` reuses the existing per-founder pipeline
+  directly rather than persisting `companyContext`/`matchedJob` for a cheaper LLM-only retry —
+  regenerate is human-triggered and low-volume, so the extra Firecrawl/OpenAI cost of a full
+  re-run isn't worth a schema change. Discovered along the way: `ReviewStore.decide()` already had
+  a `'regenerate'` action, but it only flips status back to `pending` and never touches draft
+  content — a pre-existing dead end, not something this session broke. The dashboard's
+  "Regenerate" button now calls the new endpoint for founder cards instead.
+- `MAX_MESSAGE_CHARS` corrected from 285 to 8,000 — the 285 figure was based on LinkedIn's
+  connection-request-note limit, the wrong product; every founder processed here is already a
+  1st-degree connection, so the real limit is the ~8,000-char regular-DM cap (verified live
+  against multiple independent sources). Used as a safety backstop only, not a style target, per
+  the user's explicit direction: no fixed length, let the model decide per founder.
+- Drafting voice matched to a real sample the user provided live in conversation (not invented) —
+  added as an explicit prompt reference (structure/tone only, same framing as the resume
+  `reference_text`), plus a code-level `EM_DASH_PATTERN` guard, since prompt-only style
+  instructions weren't reliably followed (same lesson as the placeholder/generic-opener guards).
 
 ## Minor decisions
 
@@ -148,18 +172,16 @@ See `docs/decisions.md` for full reasoning. Summary:
 - Company-profile lookup running on every live-verified job roughly doubles Firecrawl search
   volume for that step — cheap per call, worth watching via the usage strip.
 - `FIRECRAWL_API_KEY`, `APIFY_API_TOKEN`, and `OPENAI_API_KEY` were printed in full into a
-  conversation transcript on 2026-08-04 (see "Active plan" above) — **not yet rotated**.
+  conversation transcript on 2026-08-04 (see "Active plan" above) — **rotated 2026-08-05**, all
+  three regenerated in their provider dashboards, `.env` updated, `worker` container recreated
+  and confirmed healthy with 0 errors on boot.
 
 ## Next steps
 
-1. **Rotate `FIRECRAWL_API_KEY`, `APIFY_API_TOKEN`, and `OPENAI_API_KEY`** — exposed in a
-   conversation transcript on 2026-08-04, user chose to defer rotation to finish the test import
-   first. Regenerate in each provider's dashboard, update `.env`.
-2. Review the 9 drafted founder-outreach messages in the dashboard (approve/reject/regenerate).
-   **Double-check Aravind Jayendran's draft specifically** — it names his company "LatentGraph"
-   instead of the listed "LatentForce" (likely an ambiguous company-website search match), not
-   yet corrected. Re-run `POST /api/founders/import` with the same `Connections.csv` to process
-   the next batch of the remaining 167 flagged founders whenever ready — raise `DAILY_LEAD_CAP`
-   in `.env` first if a bigger batch is wanted.
-3. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
+1. Review the 12 pending founder-outreach drafts in the dashboard (approve/reject/regenerate —
+   regenerate now actually redrafts, not just resets status; all 12 currently reflect the
+   corrected char limit and voice-matched prompt). Re-run `POST /api/founders/import` with the
+   same `Connections.csv` to process the next batch of the remaining 164 flagged founders whenever
+   ready — raise `DAILY_LEAD_CAP` in `.env` first if a bigger batch is wanted.
+2. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
    the user wants that (currently off; manual trigger via `POST /api/discovery/run` still works).

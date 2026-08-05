@@ -384,3 +384,80 @@ flagged to the user rather than silently "fixed": a drafted message referred to 
 company by a different name than the one listed for them (likely an ambiguous company-website
 search match) — a correctness/grounding issue, not a prompt-quality one, left for human review
 to catch as designed.
+
+---
+
+## 2026-08-05 — `reasoning_effort: 'high'` for founder-outreach drafting, verified live (not assumed)
+
+**Context:** User asked to hardn the founder-outreach draft quality and reconsider model/effort.
+`gpt-5.6-terra` rejecting non-default `temperature` (see entry above) was a strong signal it's a
+genuine reasoning-class model, on which OpenAI's `reasoning_effort` param might apply — but given
+the temperature incident was caused by exactly this kind of unverified assumption, this needed a
+real API call before wiring it in, not inference from the model family name.
+
+**Verified live against the real OpenAI API (not the codebase's mocked tests):**
+- `reasoning_effort` is accepted for `gpt-5.6-terra`. An invalid value returns a proper
+  `invalid_request_error` naming the real accepted set: `none`, `low`, `medium`, `high`, `xhigh`.
+- At `high` on a real drafting-shaped prompt, the response used genuine reasoning tokens (198,
+  confirmed via `usage.completion_tokens_details.reasoning_tokens`, not just accepted-and-ignored)
+  and produced a clean, in-spec draft (specific, under the character cap, no placeholders).
+
+**Decision:** Set `reasoning_effort: 'high'` for `draftOutreachMessage`'s OpenAI call. Cost is
+trivial at this feature's volume (human-triggered, capped batches of a few founders at a time),
+and outreach drafting is exactly the kind of task (tight constraints: character cap, no filler,
+no placeholders, one specific ask) that benefits from more deliberation, not less.
+
+**Also added:** a code-level `GENERIC_OPENER_PATTERN` backstop (banned-phrase list: "impressed
+by", "innovative approach", "following your journey", "reaching out because", "hope this message
+finds you well") nulling the draft and forcing regeneration if the model produces one anyway —
+live drafts kept reproducing the prompt's own labelled bad-example pattern almost verbatim (e.g.
+Jayaveeran Kayarohanam's draft), proving prompt-only instructions aren't reliable here, same
+lesson already learned from the placeholder guard.
+
+---
+
+## 2026-08-05 — Fixed a wrong LinkedIn character limit (300 vs. ~8,000), then matched the drafting voice to a real user sample
+
+**Context:** `MAX_MESSAGE_CHARS = 285` was based on LinkedIn's connection-request-note limit
+(300 chars). User caught the mistake: every founder this feature processes is already a
+1st-degree connection (the feature only exists by reading the user's own connections export), so
+the actual message sent is a regular direct message, not a connection-request note.
+
+**Verified live (web search, multiple independent sources — LeadLoft, LaGrowthMachine,
+LinkedFusion, not assumed):** connection-request notes cap at 300 characters; regular messages to
+an existing 1st-degree connection cap at ~8,000 characters. Different LinkedIn products, different
+limits.
+
+**Decision:** `MAX_MESSAGE_CHARS` → `8_000`, used as a safety backstop only (matches the existing
+truncate-if-somehow-exceeded pattern), not a style target. User's explicit direction, asked not
+assumed: no fixed target length at all — let the model decide per founder based on how much real
+content there is to say. Rewrote the system prompt accordingly and regenerated all 12 pending
+drafts; average length moved from ~170-330 chars (terse, connection-note style) to ~280-500 chars
+(substantive, warm-DM style), without ever approaching the 8,000-char ceiling.
+
+**Follow-up, same session:** user pointed out the regenerated drafts, while passing every existing
+guard, still read as AI-written — a repeated template skeleton ("I noticed you're building/leading
+X ... would you be open to a 15-minute conversation") and occasional em dashes. Asked whether to
+strip AI-isms generically or match the user's actual voice; user chose both. User had no saved
+writing samples on hand, so provided one real example live in conversation instead of stalling on
+a request for more. Extracted concrete, checkable style markers from that single sample (casual
+opener, sentences chained with "and" rather than clipped, no em dashes, a real personal analogy
+when one genuinely applies, a low-key ask) and added it to the prompt as an explicit voice
+reference — same "structure/tone only, never copy the literal content" framing already used for
+the resume `reference_text`. Added a code-level `EM_DASH_PATTERN` guard (same principle as the
+placeholder/generic-opener guards — a prompt rule alone isn't reliably followed) rather than
+relying on the prompt instruction alone.
+
+**A live regenerate initially looked like a fresh hallucination** (Aravind Jayendran's draft
+referenced "Cabocab," a ride-hailing platform, and inconsistently called his company both
+"LatentForce" and "LatentGraph" in the same message) — investigated before assuming either a
+hallucination or a code bug: "Cabocab" is genuinely from the user's own resume reference text
+(confirmed via `grep` against the real extracted resume files, not a fabrication); "LatentForce"
+vs. "LatentGraph" is not a naming error either — confirmed via a live Firecrawl scrape of the
+company's real site that LatentForce is the company and LatentGraph is their actual flagship
+product name (npm package `@latentforce/latentgraph`, "$1.7M seed" news item on their own
+homepage). **This closes out the "Aravind Jayendran naming mismatch" item that had been carried
+as an open known-issue since 2026-08-04 — it was never actually a bug**, just two genuinely
+different real names (company vs. product) that both correctly belong in the message. All 12
+drafts regenerated a second time with the voice-matched prompt; all pass every guard (placeholder,
+generic-opener, em dash) with zero flags.
