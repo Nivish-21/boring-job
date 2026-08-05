@@ -1,6 +1,11 @@
 # Status
 
-_Last updated: 2026-08-05 (session 3)_
+_Last updated: 2026-08-05 (session 4)_
+
+**Note (2026-08-05):** `docs/changelog.md`, `docs/decisions.md`, `docs/lessons.md`, and
+`docs/plan.md` are local-only from this point on (untracked, gitignored) — user's explicit call,
+those are verbose working logs that don't need to live on the GitHub remote. This file
+(`status.md`) is the only doc still tracked and pushed, as the single current-state snapshot.
 
 ## Current state
 

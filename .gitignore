@@ -7,3 +7,10 @@ data/review/*
 npm-debug.log*
 .firecrawl/
 worker/founder-outreach/
+
+# Verbose working logs -- kept local only. docs/status.md stays tracked as the
+# single pushed snapshot of current state.
+docs/changelog.md
+docs/decisions.md
+docs/lessons.md
+docs/plan.md
