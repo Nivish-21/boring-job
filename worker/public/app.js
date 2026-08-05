@@ -6,7 +6,17 @@ const resultCount = document.querySelector('#result-count');
 const clearFiltersButton = document.querySelector('#clear-filters');
 const filterCompany = document.querySelector('#filter-company');
 const filterFitMin = document.querySelector('#filter-fit-min');
+const filterFitGroup = document.querySelector('#filter-fit-group');
 const statusCheckboxes = [...document.querySelectorAll('input[name="status"]')];
+const tabs = [...document.querySelectorAll('.tab')];
+
+// Job applications and founder-outreach messages are fundamentally different tasks (read a
+// generated packet vs. copy a short message and send it elsewhere) that used to sit interleaved
+// in one flat list with no way to tell them apart at a glance -- user feedback: "I don't know
+// which one to send to whom". Tabs are a standard, expected pattern for this (not a novel
+// affordance); each kind gets its own explicit, exclusive view. Defaults to Founder outreach
+// since that's the active to-do list; Job applications is the larger, denser archive.
+let activeKind = 'founder';
 
 const formatDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 const formatResetDate = (value) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
@@ -131,6 +141,7 @@ const applyFilters = (cards) => {
   const company = filterCompany.value.trim().toLowerCase();
   const fitMin = filterFitMin.value === '' ? null : Number(filterFitMin.value);
   return cards.filter((card) => {
+    if (card.kind !== activeKind) return false;
     if (!checkedStatuses.includes(card.status)) return false;
     if (company && !(card.company || '').toLowerCase().includes(company)) return false;
     if (fitMin !== null && (typeof card.fit_score !== 'number' || card.fit_score < fitMin)) return false;
@@ -170,6 +181,17 @@ const decide = async (reviewItem, action, button) => {
     button.disabled = false;
     window.alert(error.message);
   }
+};
+
+const copyDraft = async (draft, button) => {
+  const originalLabel = button.textContent;
+  try {
+    await navigator.clipboard.writeText(draft);
+    button.textContent = 'Copied!';
+  } catch {
+    button.textContent = 'Copy failed';
+  }
+  setTimeout(() => { button.textContent = originalLabel; }, 1800);
 };
 
 const renderCard = (card) => {
@@ -221,6 +243,18 @@ const renderCard = (card) => {
     fragment.querySelector('.draft-wrap').hidden = false;
     fragment.querySelector('.draft').textContent = card.draft;
   }
+  // Copy-to-send is the actual task-completing action for a founder message (it gets pasted into
+  // LinkedIn, never sent from here) -- shown whenever a draft exists, independent of status, so
+  // it still works after approving. Downgrades "Approve" to secondary on these cards specifically
+  // so there's one clear primary action, not two competing blue buttons.
+  if (card.kind === 'founder' && card.draft) {
+    const copyButton = fragment.querySelector('.copy-draft');
+    copyButton.hidden = false;
+    copyButton.addEventListener('click', () => copyDraft(card.draft, copyButton));
+    const approveButton = fragment.querySelector('[data-action="approve"]');
+    approveButton.classList.remove('button-primary');
+    approveButton.classList.add('button-secondary');
+  }
   if (card.evidence.length) {
     fragment.querySelector('.evidence-wrap').hidden = false;
     const list = fragment.querySelector('.evidence');
@@ -246,13 +280,31 @@ const renderCard = (card) => {
 };
 
 const renderResults = () => {
+  const kindTotal = allCards.filter((card) => card.kind === activeKind).length;
   const filtered = applyFilters(allCards);
-  resultCount.textContent = `${filtered.length} of ${allCards.length} jobs`;
+  const noun = activeKind === 'founder' ? 'messages' : 'jobs';
+  resultCount.textContent = `${filtered.length} of ${kindTotal} ${noun}`;
+  listings.setAttribute('aria-labelledby', `tab-${activeKind}`);
   listings.replaceChildren();
   if (!filtered.length) {
-    return showMessage(listings, allCards.length ? 'No jobs match the current filters.' : 'No jobs discovered yet. Run the discovery workflow to populate this list.');
+    const empty = activeKind === 'founder'
+      ? (kindTotal ? 'No founder messages match the current filters.' : 'No founder-outreach messages yet. Import a connections CSV to populate this list.')
+      : (kindTotal ? 'No jobs match the current filters.' : 'No jobs discovered yet. Run the discovery workflow to populate this list.');
+    return showMessage(listings, empty);
   }
   filtered.forEach((card) => listings.append(renderCard(card)));
+};
+
+const updateTabCounts = () => {
+  document.querySelector('#tab-count-founder').textContent = `(${allCards.filter((card) => card.kind === 'founder').length})`;
+  document.querySelector('#tab-count-job').textContent = `(${allCards.filter((card) => card.kind === 'job').length})`;
+};
+
+const setActiveTab = (kind) => {
+  activeKind = kind;
+  tabs.forEach((tab) => tab.setAttribute('aria-selected', String(tab.dataset.kind === kind)));
+  filterFitGroup.hidden = kind === 'founder';
+  renderResults();
 };
 
 async function loadAll() {
@@ -264,6 +316,7 @@ async function loadAll() {
     if (!jobsResponse.ok) throw new Error(jobsPayload.error || 'Could not load discovered jobs');
     if (!itemsResponse.ok) throw new Error(itemsPayload.error || 'Could not load the review queue');
     allCards = buildCards(jobsPayload.jobs, itemsPayload.items);
+    updateTabCounts();
     renderResults();
   } catch (error) {
     showMessage(listings, error.message, 'error');
@@ -306,6 +359,7 @@ async function loadUsage() {
 statusCheckboxes.forEach((box) => box.addEventListener('change', renderResults));
 filterCompany.addEventListener('input', renderResults);
 filterFitMin.addEventListener('input', renderResults);
+tabs.forEach((tab) => tab.addEventListener('click', () => setActiveTab(tab.dataset.kind)));
 clearFiltersButton.addEventListener('click', () => {
   statusCheckboxes.forEach((box) => { box.checked = true; });
   filterCompany.value = '';
@@ -313,5 +367,6 @@ clearFiltersButton.addEventListener('click', () => {
   renderResults();
 });
 refreshButton.addEventListener('click', () => { loadAll(); loadUsage(); });
+setActiveTab(activeKind);
 loadAll();
 loadUsage();

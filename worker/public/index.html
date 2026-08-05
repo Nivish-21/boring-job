@@ -12,13 +12,17 @@
       <header class="masthead">
         <div>
           <p class="product-name">Career-Ops</p>
-          <h1>Job listings</h1>
-          <p class="lede">Every job the pipeline has scraped and evaluated. Review evidence and drafts before a supervised next step.</p>
+          <h1>Review queue</h1>
+          <p class="lede">Job applications the pipeline has scraped and evaluated, and founder-outreach messages ready to copy and send. Review before any supervised next step.</p>
         </div>
         <button class="button button-secondary" id="refresh" type="button">Refresh</button>
       </header>
       <p class="notice">Approval records a decision only. This dashboard never submits an application or sends a message.</p>
       <section id="usage" class="usage" aria-live="polite" hidden></section>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" id="tab-founder" aria-controls="listings" data-kind="founder" type="button">Founder outreach <span class="tab-count" id="tab-count-founder"></span></button>
+        <button class="tab" role="tab" id="tab-job" aria-controls="listings" data-kind="job" type="button">Job applications <span class="tab-count" id="tab-count-job"></span></button>
+      </div>
       <div class="layout">
         <aside class="sidebar">
           <h2>Filters</h2>
@@ -37,7 +41,7 @@
             <label for="filter-company">Company</label>
             <input type="search" id="filter-company" placeholder="Search company…">
           </div>
-          <div class="filter-group">
+          <div class="filter-group" id="filter-fit-group">
             <label for="filter-fit-min">Minimum fit score</label>
             <input type="number" id="filter-fit-min" min="0" max="10" placeholder="0">
           </div>
@@ -45,7 +49,7 @@
         </aside>
         <section class="results">
           <p class="result-count" id="result-count"></p>
-          <section id="listings" class="queue" aria-live="polite" aria-busy="true"></section>
+          <section id="listings" class="queue" aria-live="polite" aria-busy="true" role="tabpanel" aria-labelledby="tab-founder"></section>
         </section>
       </div>
     </main>
@@ -76,6 +80,7 @@
           <a class="button button-secondary artifact-link" target="_blank" rel="noreferrer" hidden>Open artifact</a>
           <a class="button button-secondary website-link" target="_blank" rel="noreferrer" hidden>Company website</a>
           <a class="button button-secondary linkedin-link" target="_blank" rel="noreferrer" hidden>Company LinkedIn</a>
+          <button class="button button-primary copy-draft" type="button" hidden>Copy message</button>
           <button class="button button-primary" data-action="approve" type="button" hidden>Approve</button>
           <button class="button button-secondary" data-action="regenerate" type="button" hidden>Regenerate</button>
           <button class="button button-danger" data-action="reject" type="button" hidden>Reject</button>

@@ -709,3 +709,184 @@ here since every processed founder is already a connection; not building any InM
 **Block complete.** Both the character-limit fix and the voice-matching follow-on are done,
 tested (121/121 passing), deployed, and live-verified against the real running API — all 12
 founder drafts regenerated and manually reviewed for quality, guard compliance, and grounding.
+
+## New task block: dashboard restructure (job vs. founder-outreach) — DONE (2026-08-05)
+
+**Goal:** user reported the review dashboard was "not structured... I don't know which one to
+send to whom" — job-application packets and founder-outreach DMs were interleaved in one flat
+list titled "Job listings," with no way to filter by kind and no explicit "send this" action on
+founder cards.
+
+**Routed through the impeccable skill's `layout` command** (scoped fix to existing code, register:
+Operate/product — dashboard/tool). Mechanical scan (`detect.mjs`) came back clean, confirming this
+was a structural/hierarchy problem, not a decoration problem.
+
+**Steps — all done:**
+- [x] `index.html`: added a `role="tablist"` with two tabs ("Founder outreach (N)" / "Job
+      applications (N)"), rewrote the masthead header/lede to describe both content types instead
+      of only jobs, added a "Copy message" button to the card template.
+- [x] `styles.css`: `.tabs`/`.tab` styled consistent with the existing OKLCH dark system and
+      button vocabulary — underline-indicator tabs (a standard, non-invented affordance per
+      Operate-mode "product permissions"), no new color introduced beyond the existing `--primary`
+      accent.
+- [x] `app.js`: `activeKind` state (defaults to `founder`, the more time-sensitive to-do list),
+      `applyFilters` now filters by kind first, tab click handlers, per-kind counts, the
+      "Minimum fit score" filter auto-hides on the Founder tab (always null there — Operate-mode
+      "don't show a dead control"). Added `copyDraft()` (clipboard write + "Copied!"/"Copy failed"
+      feedback, 1.8s revert) wired to founder cards specifically; downgrades "Approve" to
+      secondary styling on those cards so there's one clear primary action, not two blue buttons.
+- [x] Verified live in-browser (not just source review): both tabs render, switch correctly,
+      counts and filters behave per-kind, squint test passes (primary/secondary/groups legible at
+      a glance). 121/121 backend tests still passing (no backend touched). Deployed
+      (`docker compose build && up -d worker`), served `app.js` re-verified byte-identical to
+      source.
+- [~] **Copy-button clipboard write could not be fully verified in this session** — a
+      `navigator.clipboard.writeText()` call from an automated (Claude-in-Chrome) click appears to
+      hang waiting on a permission prompt, timing out a CDP eval call. This is very likely an
+      automation-environment artifact (Chrome auto-grants `clipboard-write` for a *trusted* user
+      gesture in a secure context with no prompt at all; a synthetic automated click may not count
+      as trusted) rather than a real bug, but this was **not independently confirmed** — user
+      should manually click "Copy message" once in their own real browser and confirm it works
+      before relying on it.
+
+**Follow-up, not yet started (see next block):** while reviewing a job-application packet on the
+newly-separated Job applications tab, user found the draft itself uses the literal placeholder
+"Candidate" as the applicant's name and an unfilled "Add verified candidate facts" stub — a
+separate, real defect in `job-pipeline.mjs`, not part of this dashboard-structure block.
+
+## New task block: fix placeholder "Candidate" name and empty facts stub in job packets (2026-08-05) — PROPOSED, NOT STARTED
+
+**Goal:** every job-application packet `packetDraft()` has ever generated says `"I'm Candidate...
+Best, Candidate"` and `"Add verified candidate facts before using this draft."` — user caught this
+live while reviewing a real packet on the newly-split Job applications tab.
+
+**Root cause (confirmed, not guessed):** `packetDraft(job, evaluation, candidate, ...)` in
+`job-pipeline.mjs` (line 62-73) is a plain template function, not an LLM call. It reads
+`candidate?.name` (falls back to the literal string `'Candidate'`) and
+`candidate?.verified_facts` (falls back to the stub line) — but **no caller anywhere in the
+codebase ever supplies a `candidate` object**. Checked every call site of `pipeline.process()`:
+`job-discovery.mjs`, `founder-outreach.mjs`, and the manual `POST /api/pipeline/jobs` route all
+omit it. This is a scaffolded-but-never-wired feature, not a regression — every one of the current
+32 job packets has this defect.
+
+**User's direction (asked, not assumed):** the "verified candidate facts" section should be filled
+by a new LLM call that selects 3-5 real facts per job from the matched resume's `reference_text`
+(not a fixed static list) — same tradeoff already made for founder-outreach: costs a real OpenAI
+call per packet, but more relevant per posting.
+
+**Steps:**
+- [ ] `fit-evaluator.mjs`: add `selectVerifiedFacts(job, resumeBucket, {apiKey, fetchImpl, model})`
+      — mirrors `classifyResumeBucket`'s exact shape (gpt-4o-mini, `temperature: 0`,
+      `response_format: json_object`, degrades to `{facts: [], reason}` on any failure/missing
+      key/no resumeBucket, never throws). Prompt: extract 3-5 concrete facts *from
+      `resumeBucket.reference_text` only*, relevant to this specific job — explicit "never invent,
+      only extract or lightly paraphrase what's literally in the text" rule (same grounding
+      discipline as the founder-outreach guards). Returns `{facts: string[], reason: string}`.
+- [ ] `job-pipeline.mjs`: `JobPipeline` constructor gains `defaultCandidate = null` (static
+      `{name}`) and `factSelector = null` (mirrors `resumeClassifier`'s injection pattern exactly).
+      In `process()`, after `resumeBucket` is resolved: merge `defaultCandidate` with any
+      explicitly-passed `candidate` (explicit always wins), and only call `factSelector` when the
+      merged candidate has no `verified_facts` yet AND a `resumeBucket` matched AND `factSelector`
+      is wired. Pass the merged candidate into the **unchanged** `packetDraft()` — no signature
+      change needed there at all.
+- [ ] `server.mjs`: new env var `CANDIDATE_NAME` (unset degrades to the existing `'Candidate'`
+      fallback, so nothing crashes for a user who hasn't configured it). Wire
+      `factSelector = (job, resumeBucket) => selectVerifiedFacts(job, resumeBucket, {apiKey:
+      openaiApiKey})` and `defaultCandidate = { name: process.env.CANDIDATE_NAME || undefined }`
+      into `new JobPipeline({...})`.
+- [ ] `.env.example`: add `CANDIDATE_NAME=` with a comment; real value goes in the user's own
+      `.env` (their actual name, not committed).
+- [ ] Tests: `fit-evaluator.test.mjs` for `selectVerifiedFacts` (happy path + every degrade path,
+      mirrors `classifyResumeBucket`'s existing test shape); `job-pipeline.test.mjs` for the new
+      merge/injection logic in `process()` (defaultCandidate name flows through when no explicit
+      candidate given; factSelector only fires when no facts already present AND a resumeBucket
+      matched; an explicitly-passed candidate with its own `verified_facts` is never overridden).
+- [ ] `docs/decisions.md`/`docs/changelog.md`/`docs/status.md` — log the root cause and fix.
+
+**Known limitation, flagged up front, not solved by this block:** there is no regenerate mechanism
+for job packets (unlike founder-outreach's `regenerateOne`) — `process()` dedupes by stable_id, so
+re-running discovery against an already-processed URL just returns `'duplicate'`, it never
+redrafts. This fix only corrects packets generated *after* it ships; the current 32 existing job
+packets keep the "Candidate" placeholder unless something explicitly reprocesses them. Building a
+job-packet regenerate path is out of scope for this block — flagged as a possible follow-up, not
+assumed the user wants it built.
+
+**Approved by user, expanded:** user wants existing job packets reprocessed too (was going to be
+scoped separately, folded in here). But before building anything further, user wants an
+independent quality gate run first — see the new block immediately below. **Read that block's
+findings before writing a single line of the fact-selector prompt** — if personas surface a
+grounding or tone weakness, the new prompt should be designed to avoid it from the start, not
+patched after the fact like the char-limit/voice/em-dash issues were this session.
+
+## New task block: multi-persona quality gate on live output (2026-08-05) — PROPOSED, NOT STARTED, RUN THIS FIRST
+
+**Why this exists:** three real, user-facing defects shipped and sat live before being caught this
+session — the 285-char wrong-limit mistake, the AI-sounding formulaic drafts, and the "Candidate"
+placeholder that has been in *every single job packet since the feature was built*, unnoticed
+until the user happened to read one on the newly-split dashboard tab. Self-assessment (my own
+review, plus the existing code-level guards) missed all three. The pattern: **building the check
+and running the check with the same mind that wrote the code doesn't surface what that mind is
+blind to.** User's explicit ask: before building the next fix, get an honest, independent read on
+whether current live output is actually good — using multiple domain-expert personas as genuinely
+separate agents (not me role-playing inline), each blind to how the drafts were built, each asked
+plainly "would you, personally, accept/send/act on this if you were responsible for it?" Any "no"
+is ground truth pointing at a specific prompt or model weakness to fix directly — not a stylistic
+nitpick to weigh against other priorities.
+
+**Scope:** audit real, current live drafts already sitting in the review dashboard (not
+hypothetical examples) — a sample of the 12 founder-outreach messages and a sample of ~6-8 job
+packets from the 32 (the audit doesn't need all 32, but pick a spread: some with a matched open
+role, some without, some with a resume bucket match, some without, to exercise different branches
+of `packetDraft()`).
+
+**Personas (concrete domain lens, not generic titles) — dispatch each as its own Agent call, run
+in parallel, give each ONLY the raw draft(s) + its persona framing below, nothing about how this
+project built them (keeps the read genuinely blind, not primed to be generous):**
+
+1. **The recipient founder** — a busy, moderately senior startup founder who gets 10-20 LinkedIn
+   "let's connect" messages a week and ignores nearly all of them. Given each founder-outreach
+   draft cold (as if it just landed in their LinkedIn inbox): would they actually reply? Does it
+   read as a real specific person, or a templated pitch with the name swapped in? Rate each
+   PASS/FAIL plus the one line that would make them stop reading.
+2. **A technical hiring manager** screening inbound applications for the specific role each job
+   packet targets. Given the packet's "Draft note" + selected facts: does this read as a credible,
+   targeted application worth an interview slot, or generic filler? Are the facts chosen the
+   *strongest* relevant ones, or just present-but-weak? PASS/FAIL plus the weakest line.
+3. **A cold-outreach/growth specialist** (the kind of person who reviews SDR sequences for a
+   living) — judges structure and persuasiveness independent of authenticity: does the ask land,
+   is there a clear single next step, is anything wasted/redundant.
+4. **An AI-writing-tell auditor** — explicitly re-runs the same checklist the `humanizer` skill
+   uses (inflated symbolism, promotional language, rule-of-three, vague attributions, filler
+   phrases, AI vocabulary) against each draft, specifically hunting for what the existing
+   mechanical guards (placeholder/generic-opener/em-dash patterns) are structurally incapable of
+   catching, since those are exact-string/regex matches, not a holistic read.
+5. **A grounding fact-checker** — for each claim in each draft (a company detail, a "verified
+   fact," a matched role), checks it against the actual source data supplied to this project
+   (resume `reference_text`, the scraped `companyContext`, the verified job posting) and flags
+   anything not directly traceable — the same check that resolved the Cabocab/LatentGraph question
+   earlier this session, run systematically instead of only when something looks suspicious.
+
+**Steps:**
+- [ ] Pull the real current sample (12 founder drafts via `GET /api/review/items`, ~6-8 job
+      packets via `GET /api/pipeline/jobs` + their linked review items) before dispatching agents —
+      personas review real live text, not paraphrased summaries.
+- [ ] Dispatch all 5 persona agents in parallel (single message, multiple `Agent` tool calls per
+      the parallel-dispatch rule), each scoped to its lens above, each given only the raw sample +
+      its persona framing.
+- [ ] Collect verdicts into one punch list: which specific drafts failed which persona, and why,
+      in the persona's own words — not softened or summarized into vague themes.
+- [ ] Triage the punch list: separate (a) prompt-fixable issues (add another explicit rule/example,
+      same pattern as the banned-phrase/em-dash guards), (b) code-guard-fixable issues (a new
+      mechanical check, if the failure mode is pattern-detectable), (c) architectural issues (the
+      fact-selector or drafting approach itself needs to change, not just be tuned).
+- [ ] Only then design/build the job-packet candidate-name + fact-selector fix (previous block) —
+      informed by whatever this surfaces, not written blind to it.
+- [ ] Reprocess the 32 existing job packets once the fix is confirmed good by the same persona
+      standard (spot-check a few post-fix packets through personas 2 and 5 specifically before
+      declaring this done — don't just trust the code ran without error).
+- [ ] Log findings in `docs/decisions.md` regardless of outcome (even "personas found nothing
+      wrong" is worth recording, so this isn't re-litigated from scratch next time).
+
+**Explicit priority for next session (user is compacting after this):** run this block *before*
+the job-packet candidate-name/fact-selector block above. This block's findings should shape how
+that fix is built, not be run after the fact as a second check on a design already locked in.
