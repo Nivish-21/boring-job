@@ -222,18 +222,40 @@ Built: rewrote both prompt locations that handed the model the exact banned phra
 founder drafts — none triggered any guard; spot-checked all 12 for a genuinely specific closing
 ask, confirmed. Logged in `docs/decisions.md`/`docs/changelog.md`.
 
-## Next steps
+## Session 4 (2026-08-05) — doc-tracking scope change; next task chosen, not yet executed
 
-1. **Remaining quality-gate findings, not yet acted on** (see `docs/decisions.md` triage): the
-   thin-company-research issue (4/12 drafts still read generically — Kunal M, Celiba Narayanan,
-   Thomas Marge, Harinder Singh) and the two unconfirmed grounding mismatches (Playroot Golf's
-   evidence URL resolves to `golfroots.com`; Aravind Jayendran's LinkedIn evidence resolves to
-   `linkedin.com/company/latent-health`) both need investigation/design before building anything.
-2. The job-packet candidate-name + fact-selector block in `plan.md` is still the next planned
-   architectural fix, now validated by the audit (finding 4).
-3. Review the 12 regenerated founder-outreach drafts in the dashboard (approve/reject/regenerate).
+Two things happened this session, no application code touched:
+
+1. **Doc push scope changed, per explicit user instruction:** `docs/changelog.md`,
+   `docs/decisions.md`, `docs/lessons.md`, and `docs/plan.md` are now gitignored/untracked — they
+   stay on local disk and keep being read/written as normal, they just no longer get pushed to the
+   GitHub remote. Only this file (`status.md`) is still tracked and pushed, as the single
+   current-state snapshot. Committed (`cf0ff6f`) and pushed. Also saved as a standing project
+   preference in Claude's memory system so it isn't re-litigated next session.
+2. **Next task selected, plan written, execution NOT started:** asked which of the four items below
+   to tackle next; user chose the job-packet candidate-name + fact-selector fix. The full step list
+   already existed in `plan.md` (written 2026-08-05, approved in principle, held pending the
+   quality-gate audit) — added a resume note there confirming the audit surfaced nothing that
+   changes the design, and that it's **awaiting a "go" to execute**, not yet started.
+
+## Next session: pick up directly with the job-packet fact-selector fix
+
+**Do not re-derive or re-plan this** — `docs/plan.md`, the "fix placeholder 'Candidate' name and
+empty facts stub in job packets" block, has the full approved step list plus a 2026-08-05
+session-4 resume note. Open by confirming the user still wants to go ahead with it (last state:
+plan written, not yet approved to execute), then execute in order:
+`fit-evaluator.mjs` → `job-pipeline.mjs` → `server.mjs` → `.env.example` → tests → reprocess the 32
+existing job packets (a regenerate mechanism needs building first, flagged as a known gap inside
+that same block) → log.
+
+**Still open, not part of the chosen task, no action taken:**
+1. Thin-company-research issue (4/12 founder drafts still read generically — Kunal M, Celiba
+   Narayanan, Thomas Marge, Harinder Singh) and two unconfirmed grounding mismatches (Playroot
+   Golf's evidence URL resolves to `golfroots.com`; Aravind Jayendran's LinkedIn evidence resolves
+   to `linkedin.com/company/latent-health`) — both need investigation/design before building.
+2. Review the 12 regenerated founder-outreach drafts in the dashboard (approve/reject/regenerate).
    Re-run `POST /api/founders/import` with the same `Connections.csv` to process the next batch of
    the remaining 164 flagged founders whenever ready — raise `DAILY_LEAD_CAP` in `.env` first if a
    bigger batch is wanted.
-4. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
+3. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
    the user wants that (currently off; manual trigger via `POST /api/discovery/run` still works).
