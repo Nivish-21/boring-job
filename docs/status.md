@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-05 (session 3)_
 
 ## Current state
 
@@ -176,12 +176,59 @@ See `docs/decisions.md` for full reasoning. Summary:
   three regenerated in their provider dashboards, `.env` updated, `worker` container recreated
   and confirmed healthy with 0 errors on boot.
 
+## Session 2 (2026-08-05) — pending-commit cleanup + multi-persona quality gate
+
+Committed the dashboard-restructure work (`5e1070c`) that had been built and deployed 2026-08-04
+but never actually committed to git — tree is clean now, 1 commit ahead of `origin/main`, not
+pushed.
+
+Ran the multi-persona quality gate `plan.md` flagged as "RUN THIS FIRST": 5 independent agents
+(recipient founder, technical hiring manager, cold-outreach specialist, AI-writing-tell auditor,
+grounding fact-checker), each blind to how the drafts were built, audited the 12 real pending
+founder-outreach drafts + the 1 real job packet currently live. Full findings and triage in
+`docs/decisions.md` (2026-08-05 entry). Headline finding: **11 of 12 founder drafts share the
+same non-ask closing line** ("happy to hop on a call whenever works for you"), independently
+flagged by 3 of 5 personas — not caught by any existing mechanical guard, since it's a repeated
+structural pattern rather than banned vocabulary. Also found: 8/12 generic drafts trace to thin
+company research rather than a prompt defect; two unconfirmed grounding mismatches (Playroot
+Golf's evidence URL resolves to `golfroots.com`; Aravind Jayendran's LinkedIn evidence resolves to
+`linkedin.com/company/latent-health`); the job-packet "Candidate" placeholder defect reconfirmed
+independently by 2 personas (validates, doesn't change, the already-planned fact-selector fix).
+
+Also corrected a stale plan premise: only **1** of 32 pipeline job records has ever actually
+reached the drafting stage (the other 31 were `skipped` first) — `plan.md` previously assumed
+"~6-8 of 32" job packets existed to sample.
+
+**No fix built this session** — awaiting user direction on which finding(s) to act on next.
+
+## Session 3 (2026-08-05) — fixed the non-ask closing line, finding 1 from the audit
+
+User chose the closing-line fix first. User also pushed back, correctly, on part of the audit's
+own reasoning: the "3 of 5 personas" framing partly relied on a recipient noticing the same closer
+repeated across founders, but no single recipient ever sees more than their own message — that
+detectability angle doesn't hold. Re-justified the fix on a narrower, still-valid basis instead
+(weak ask *within* a single message, regardless of repetition) — full reasoning in
+`docs/decisions.md`. User approved proceeding on the corrected framing.
+
+Built: rewrote both prompt locations that handed the model the exact banned phrase as its own
+"good example," added the phrase variants to the banned-phrase list, added a code-level
+`GENERIC_CLOSER_PATTERN` guard (same principle as the placeholder/generic-opener/em-dash guards).
+2 new tests, 123/123 passing. Rebuilt and redeployed the worker image. Regenerated all 12 pending
+founder drafts — none triggered any guard; spot-checked all 12 for a genuinely specific closing
+ask, confirmed. Logged in `docs/decisions.md`/`docs/changelog.md`.
+
 ## Next steps
 
-1. Review the 12 pending founder-outreach drafts in the dashboard (approve/reject/regenerate —
-   regenerate now actually redrafts, not just resets status; all 12 currently reflect the
-   corrected char limit and voice-matched prompt). Re-run `POST /api/founders/import` with the
-   same `Connections.csv` to process the next batch of the remaining 164 flagged founders whenever
-   ready — raise `DAILY_LEAD_CAP` in `.env` first if a bigger batch is wanted.
-2. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
+1. **Remaining quality-gate findings, not yet acted on** (see `docs/decisions.md` triage): the
+   thin-company-research issue (4/12 drafts still read generically — Kunal M, Celiba Narayanan,
+   Thomas Marge, Harinder Singh) and the two unconfirmed grounding mismatches (Playroot Golf's
+   evidence URL resolves to `golfroots.com`; Aravind Jayendran's LinkedIn evidence resolves to
+   `linkedin.com/company/latent-health`) both need investigation/design before building anything.
+2. The job-packet candidate-name + fact-selector block in `plan.md` is still the next planned
+   architectural fix, now validated by the audit (finding 4).
+3. Review the 12 regenerated founder-outreach drafts in the dashboard (approve/reject/regenerate).
+   Re-run `POST /api/founders/import` with the same `Connections.csv` to process the next batch of
+   the remaining 164 flagged founders whenever ready — raise `DAILY_LEAD_CAP` in `.env` first if a
+   bigger batch is wanted.
+4. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
    the user wants that (currently off; manual trigger via `POST /api/discovery/run` still works).

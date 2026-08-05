@@ -867,25 +867,86 @@ project built them (keeps the read genuinely blind, not primed to be generous):*
    earlier this session, run systematically instead of only when something looks suspicious.
 
 **Steps:**
-- [ ] Pull the real current sample (12 founder drafts via `GET /api/review/items`, ~6-8 job
-      packets via `GET /api/pipeline/jobs` + their linked review items) before dispatching agents —
-      personas review real live text, not paraphrased summaries.
-- [ ] Dispatch all 5 persona agents in parallel (single message, multiple `Agent` tool calls per
-      the parallel-dispatch rule), each scoped to its lens above, each given only the raw sample +
-      its persona framing.
-- [ ] Collect verdicts into one punch list: which specific drafts failed which persona, and why,
-      in the persona's own words — not softened or summarized into vague themes.
-- [ ] Triage the punch list: separate (a) prompt-fixable issues (add another explicit rule/example,
-      same pattern as the banned-phrase/em-dash guards), (b) code-guard-fixable issues (a new
-      mechanical check, if the failure mode is pattern-detectable), (c) architectural issues (the
-      fact-selector or drafting approach itself needs to change, not just be tuned).
+- [x] Pull the real current sample. Corrected the plan's premise while doing this: only **1** job
+      packet has ever actually been drafted (of 32 pipeline job records, 31 were `skipped` before
+      reaching drafting) — not "~6-8 of 32" as originally scoped. Used 12 pending founder drafts +
+      the 1 real job packet.
+- [x] Dispatch all 5 persona agents in parallel, each scoped to its lens, each given only the raw
+      sample + its persona framing (blind to how the drafts were built).
+- [x] Collect verdicts into one punch list — see `docs/decisions.md` 2026-08-05 entry for each
+      persona's findings in full.
+- [x] Triage the punch list into prompt-fixable / code-guard-fixable / architectural / needs-
+      investigation — see the same `docs/decisions.md` entry.
 - [ ] Only then design/build the job-packet candidate-name + fact-selector fix (previous block) —
-      informed by whatever this surfaces, not written blind to it.
+      informed by whatever this surfaces, not written blind to it. **Not started — awaiting user
+      direction on which findings to act on first.**
 - [ ] Reprocess the 32 existing job packets once the fix is confirmed good by the same persona
       standard (spot-check a few post-fix packets through personas 2 and 5 specifically before
       declaring this done — don't just trust the code ran without error).
-- [ ] Log findings in `docs/decisions.md` regardless of outcome (even "personas found nothing
-      wrong" is worth recording, so this isn't re-litigated from scratch next time).
+- [x] Log findings in `docs/decisions.md` regardless of outcome.
+
+**Findings summary (full detail in `docs/decisions.md`):**
+1. **Highest-confidence finding:** 11/12 founder drafts end with the same structural non-ask
+   ("happy to hop on a call whenever works for you") — flagged independently by 3 of 5 personas.
+   Not caught by any existing guard (it's a repeated structural pattern, not banned vocabulary).
+2. 8/12 generic drafts trace to thin company research, not a prompt defect — the 4 that pass are
+   exactly the ones where the scraped company context had something concrete to say.
+3. Two unconfirmed grounding mismatches: Playroot Golf's evidence URL is `golfroots.com`; Aravind
+   Jayendran's "Company LinkedIn" evidence resolves to `linkedin.com/company/latent-health`, not
+   LatentForce. Needs investigation into `company-lookup.mjs`'s real search results, not fixed yet.
+4. Job-packet "Candidate" placeholder independently reconfirmed by 2 personas — validates, doesn't
+   change, the already-planned fact-selector fix below.
+
+## New task block: fix the formulaic non-ask closing line (2026-08-05) — APPROVED, framing corrected
+
+**Goal:** finding 1 from the quality-gate audit above — fix the closing line that 11/12 founder
+drafts converge on.
+
+**User pushed back on the audit's framing, correctly, in part:** different founders never see each
+other's messages, so "a recipient would notice the pattern across 12 people" (the framing 3 of 5
+personas leaned on) isn't a real risk — no single recipient can detect cross-message repetition.
+**Corrected justification, which stands on its own without the repetition angle:** "happy to hop on
+a call whenever works for you" is a weak ask *within a single message read by one person* — it
+proposes no topic, no time, nothing concrete, and puts 100% of the next move on the recipient. The
+growth-specialist persona's actual point was ask quality, not detectability. Fix proceeds on this
+narrower, correct basis.
+
+**Root cause (confirmed by reading `founder-outreach.mjs` before writing this plan, not guessed):**
+the system prompt itself hands the model this exact phrase as its illustration of a good ask (line
+87: `e.g. "happy to hop on a call whenever works for you"`), and the "Good example" block (line 99)
+ends with the near-identical `"happy to jump on a call whenever works for you"`. The model is
+correctly copying the prompt's own illustrative text — same failure class as the earlier
+generic-opener bug, except the reinforced phrase sits in the *good* example this time, not the bad
+one.
+
+**Steps:**
+- [x] `founder-outreach.mjs` line 87: rewrote the closing-ask guidance to describe the desired
+      qualities abstractly (specific, tied to something just said in the message, no fixed time
+      commitment) — no literal phrase for the model to copy.
+- [x] Line 99 "Good example": rewrote its closing ask to tie to that example's own specific detail
+      (asking how the founder is thinking about scaling the backend team past this hire) instead of
+      the generic "call whenever works" phrase.
+- [x] Line 93 banned-phrase list: added "happy to hop on a call", "happy to jump on a call",
+      "whenever works for you".
+- [x] New `GENERIC_CLOSER_PATTERN` constant (mirrors `GENERIC_OPENER_PATTERN`), wired into
+      `draftOutreachMessage`'s validation chain alongside the existing placeholder/opener/em-dash
+      checks.
+- [x] Tests in `founder-outreach.test.mjs`: closer triggers regeneration (mirrors the existing
+      generic-opener test), a genuinely specific closer passes untouched. 123/123 passing (up from
+      121).
+- [x] `npm test` in `worker/` — confirmed no regressions.
+- [x] Rebuilt and redeployed the worker image (`docker compose build worker && docker compose up -d
+      worker`) — container healthy on port 8080.
+- [x] Regenerated all 12 pending founder drafts via `regenerateOne` (`POST
+      /api/founders/:profileUrl/regenerate`) once deployed. All 12 returned 200, none nulled by any
+      guard.
+- [x] Spot-checked all 12 regenerated drafts by eye: none use the banned closer phrasing, each
+      closing ask ties to something specific raised earlier in that same message (e.g. "swap notes
+      on Rewbi", "hear what sparked NeuroAGI", "what's been most important for Connecto", "what
+      you've learned from the program"). The separate thin-research-genericness finding (4/12
+      drafts still read generically — Kunal M, Celiba Narayanan, Thomas Marge, Harinder Singh) is
+      unchanged and out of scope for this block, as flagged in the audit's finding 2.
+- [x] `docs/decisions.md`/`docs/changelog.md`/`docs/status.md` — logged below.
 
 **Explicit priority for next session (user is compacting after this):** run this block *before*
 the job-packet candidate-name/fact-selector block above. This block's findings should shape how

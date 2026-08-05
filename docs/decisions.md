@@ -461,3 +461,91 @@ as an open known-issue since 2026-08-04 — it was never actually a bug**, just 
 different real names (company vs. product) that both correctly belong in the message. All 12
 drafts regenerated a second time with the voice-matched prompt; all pass every guard (placeholder,
 generic-opener, em dash) with zero flags.
+
+---
+
+## 2026-08-05 — Multi-persona quality gate on live output: findings
+
+**Context:** three real defects (285-char wrong limit, formulaic AI-sounding drafts, the
+"Candidate" placeholder) shipped and sat live before being caught by self-review. User asked for
+an independent audit — five separate agent instances, each given only raw live drafts and a
+persona framing, blind to how the drafts were built — before designing the next fix. Sample: all
+12 currently-pending founder-outreach drafts, and the one job packet that has ever actually
+reached `needs_review` (of 32 pipeline job records, only 1 was drafted — the other 31 were
+`skipped` before reaching the drafting stage; `plan.md`'s earlier "32 job packets" phrasing
+conflated pipeline records with drafted packets and was corrected here).
+
+**Findings (four of five personas converged on the same top issue independently):**
+
+1. **The closing line is a non-ask, and it's nearly identical across all 12 drafts.** The
+   recipient-founder, growth-specialist, and AI-tell personas each independently flagged that
+   11 of 12 drafts end with a close variant of "happy to hop on a call whenever works for you" —
+   structurally not an ask (no time, no specific next step), and repeated closely enough across
+   different founders/companies that a recipient comparing notes with another founder would spot
+   the template instantly. This is the single highest-confidence, highest-impact finding — it is
+   *not* caught by any existing mechanical guard (placeholder/generic-opener/em-dash), because the
+   phrase itself isn't banned vocabulary, it's a repeated *structural* pattern across messages.
+2. **8 of 12 drafts are generic because the underlying company research was thin, not because the
+   prompt is broken.** The recipient-founder persona rated these 8 FAIL; the grounding
+   fact-checker independently found the same 8 carry no specific, evidence-traceable claim at all
+   (vs. 3-4 that do: LatentForce, RevGate, Possible). The 4 PASSing drafts are exactly the ones
+   where `companyContext` (the scraped company site) actually had something concrete to say. This
+   points at the drafting prompt not being the root cause for these 8 — the model has nothing
+   specific to work with and correctly falls back to boilerplate. Fixing the prompt further won't
+   fix these; the input needs to be better or the founder needs to be flagged as "insufficient
+   research" rather than drafted generically.
+3. **Two real grounding mismatches, not yet root-caused:** Vibhav Gadwal's draft names the company
+   "Playroot" but the attached evidence URL is `golfroots.com`; Aravind Jayendran's draft's
+   "Company LinkedIn" evidence link resolves to `linkedin.com/company/latent-health`, not
+   LatentForce. Both came from `company-lookup.mjs`'s search-based matching, not the LLM draft
+   step. Not yet confirmed whether this is a real company-lookup bug (wrong search result picked)
+   or a legitimate case (rebrand, holding-company naming) — flagged for investigation, not fixed
+   here.
+4. **The job-packet "Candidate" placeholder is confirmed independently by two personas** (the
+   hiring-manager persona and the grounding fact-checker, without being told about each other's
+   finding) as the single most disqualifying defect in the one live job packet — this validates
+   the already-planned candidate-name/fact-selector fix (see `plan.md`) rather than surfacing
+   anything new about it.
+
+**Triage:**
+- **Prompt-fixable now:** finding 1 (ban the "happy to hop on a call" close-formula pattern the
+  same way the generic-opener phrase was banned; require a specific, time-bound or topic-bound
+  ask instead).
+- **Code-guard-fixable now:** finding 1 also gets a mechanical backstop (`GENERIC_CLOSER_PATTERN`
+  or equivalent), matching the project's established rule that prompt-only instructions aren't
+  reliably followed (same reasoning as the placeholder/generic-opener/em-dash guards).
+- **Architectural, not prompt-fixable:** finding 2 — needs either better company research input
+  or an explicit low-signal-skip/flag path, not another prompt rule.
+- **Needs investigation before deciding:** finding 3 — check `company-lookup.mjs`'s real search
+  results for these two founders before concluding it's a bug.
+- **Already correctly scoped:** finding 4 confirms, doesn't change, the existing planned fix.
+
+**Not yet decided:** which of these to build next, and in what order — that decision is deferred
+to the user, this entry only records the audit findings themselves per the plan's explicit
+instruction to log findings "regardless of outcome."
+
+## 2026-08-05 — Closing-line fix built on a narrowed justification after user pushback
+
+The quality-gate audit's finding 1 (11/12 founder drafts share a near-identical, weak closing
+line) was originally framed partly around cross-message detectability ("a recipient would notice
+the pattern across 12 people" — the framing 3 of 5 personas leaned on). The user correctly
+pushed back: different founders never see each other's messages, so no single recipient can
+detect repetition across the batch, and the user always copy-pastes the draft as-is rather than
+sending it verbatim to multiple people in a way that would surface the pattern.
+
+**Resolution:** the detectability framing was dropped. The fix proceeded on a narrower,
+independently-valid basis instead — "happy to hop on a call whenever works for you" is a weak ask
+*within a single message read by one person*: it proposes no topic, no time, nothing concrete, and
+puts 100% of the next move on the recipient. This was the growth-specialist persona's actual point
+underneath the (overstated) detectability framing. Root cause: the system prompt itself handed the
+model this exact phrase as its own illustration of a *good* ask (line 87) and the "Good example"
+block ended with the near-identical "happy to jump on a call whenever works for you" (line 99) —
+the model was correctly copying the prompt's own reinforced text, same failure class as the
+earlier generic-opener bug.
+
+**Fix:** rewrote both prompt locations to require the closing ask tie to something specific raised
+earlier in that same message, added the three phrase variants to the banned-phrase list, and added
+a code-level `GENERIC_CLOSER_PATTERN` backstop (same "don't trust the prompt alone" principle as
+`PLACEHOLDER_PATTERN`/`GENERIC_OPENER_PATTERN`/`EM_DASH_PATTERN`). All 12 pending founder drafts
+regenerated post-fix; none triggered any guard, and each closing ask now references a specific
+detail from its own message rather than a generic offer to talk.

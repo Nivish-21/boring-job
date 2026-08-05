@@ -23,6 +23,11 @@ const PLACEHOLDER_PATTERN = /\[[^\]]+\]/;
 // bad-example phrasing almost verbatim (generic compliment openers) despite an explicit prompt
 // rule against it -- prompt-only instructions aren't reliable here either.
 const GENERIC_OPENER_PATTERN = /impressed by|innovative approach|following your journey|reaching out because|hope this message finds you well/i;
+// Same principle, closing-line version: live drafts converged on this exact phrase (or the
+// near-identical "jump on a call") because the prompt itself used to hand it out as the
+// illustration of a good ask -- fixed in the prompt below, but caught in code too since a
+// prompt-only fix isn't reliably followed (same lesson as the two guards above).
+const GENERIC_CLOSER_PATTERN = /happy to (hop|jump) on a call|whenever works for you/i;
 // Same principle again: an em dash is one of the clearest AI-writing tells and the user's real
 // voice (see USER_VOICE_SAMPLE) never uses one -- caught in code since a prompt rule alone isn't
 // reliably followed (same lesson as the two guards above).
@@ -84,19 +89,19 @@ const buildMessages = ({ founder, companyContext, matchedJob, resumeBucket }) =>
 
 Voice reference -- a real example of how the candidate actually writes. Match its tone and sentence rhythm, but NEVER copy its specific content unless it happens to be genuinely true for the founder being messaged: "${USER_VOICE_SAMPLE}"
 
-Match that voice specifically: a casual opener (not "Hi [Name], I hope..."), run-on sentences chained together with "and" rather than clipped, over-polished corporate sentences, a real personal angle leading the message when one genuinely exists, and a low-key, easygoing ask at the end (e.g. "happy to hop on a call whenever works for you" -- not "would you be open to a 15-minute conversation next week").
+Match that voice specifically: a casual opener (not "Hi [Name], I hope..."), run-on sentences chained together with "and" rather than clipped, over-polished corporate sentences, a real personal angle leading the message when one genuinely exists, and a low-key, easygoing ask at the end -- not "would you be open to a 15-minute conversation next week". The ask must be specific to something you just said in this message, not a generic offer to talk: tie it to the role, the detail you raised, or the angle you led with, so it reads as an ask only this founder could receive.
 
 Hard rules:
 - Never use an em dash anywhere in the message -- it's one of the clearest tells of AI-written text and the candidate never writes that way.
 - Do not open with "I noticed you're building/leading [Company] as [Title] and wanted to introduce myself" or any close variant of it -- vary the opening structure between messages the way a real person naturally would, never a repeated template.
 - There is no fixed length target. Write however long it needs to be to be specific and genuine -- usually a short paragraph or two. Never pad with filler just to fill space, and never cut a real, specific point short just to sound punchy.
-- Never use these banned phrases or close variants of them: "I hope this message finds you well", "I've been following your journey", "impressed by", "innovative approach", "reaching out because".
+- Never use these banned phrases or close variants of them: "I hope this message finds you well", "I've been following your journey", "impressed by", "innovative approach", "reaching out because", "happy to hop on a call", "happy to jump on a call", "whenever works for you".
 - Never invent a fact not given in the prompt, and never leave a bracketed placeholder like "[your area of expertise]" -- if there is no specific real detail to use, omit that clause instead of guessing.
 - Lead with one specific, concrete reason for reaching out (the open role if given, or a real detail from the company context) -- not a compliment.
 - End with a single, low-friction, casual ask -- not just "let's connect".
 
 Good example (matches the voice reference's casual, run-on style, specific, no filler):
-"Hey Raj, saw Nimbus is hiring a Senior Backend Engineer and that's basically what I've been doing for the last 4 years, building production Node/Python APIs at scale and most recently leading a rewrite of a payments service that cut p99 latency by about 40%. Would love to hear more about what the role actually looks like day to day, happy to jump on a call whenever works for you."
+"Hey Raj, saw Nimbus is hiring a Senior Backend Engineer and that's basically what I've been doing for the last 4 years, building production Node/Python APIs at scale and most recently leading a rewrite of a payments service that cut p99 latency by about 40%. Would love to hear how you're thinking about scaling the backend team past this hire, if you've got 15 minutes for that this week I'd love to swap notes."
 
 Bad example, do NOT write like this -- formulaic template opener, stiff corporate cadence, weak ask:
 "Hi Raj, I noticed you're leading Nimbus as CEO and wanted to introduce myself. I'd be interested in hearing how you're thinking about the company's priorities. Would you be open to a 15-minute conversation next week?"
@@ -165,6 +170,9 @@ export const draftOutreachMessage = async ({ founder, companyContext, matchedJob
     }
     if (message && GENERIC_OPENER_PATTERN.test(message)) {
       return { message: null, reason: 'Model used a banned generic-opener phrase -- needs regeneration' };
+    }
+    if (message && GENERIC_CLOSER_PATTERN.test(message)) {
+      return { message: null, reason: 'Model used a banned generic-closer phrase -- needs regeneration' };
     }
     if (message && message.length > MAX_MESSAGE_CHARS) {
       message = truncateToWordBoundary(message, MAX_MESSAGE_CHARS);

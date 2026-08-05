@@ -446,3 +446,44 @@ every guard (placeholder, generic-opener, em dash) with zero flags, average leng
 
 **Tests:** 4 new (`founder-outreach.test.mjs`: 8,000-char truncation backstop, untouched
 substantive ~800-char message, em-dash guard). 121/121 passing project-wide (up from 119).
+
+## 2026-08-05 — Committed pending dashboard-restructure work; ran multi-persona quality gate
+
+Committed `docs/plan.md`, `worker/public/{app.js,index.html,styles.css}` — the founder/job tab
+split (built and deployed 2026-08-04) had never actually been committed to git. No code change in
+this entry beyond the commit itself.
+
+**Multi-persona quality gate (no code changes — an audit):** dispatched 5 independent agent
+personas (recipient founder, technical hiring manager, cold-outreach specialist, AI-writing-tell
+auditor, grounding fact-checker), each blind to how the drafts were built, against the 12 real
+pending founder-outreach drafts and the one real job packet currently live. Full findings in
+`docs/decisions.md`. Headline: 11/12 founder drafts share the same non-ask closing line ("happy to
+hop on a call whenever works for you"), independently flagged by 3 of 5 personas — the single
+highest-confidence finding, not caught by any existing mechanical guard. Also corrected a stale
+plan premise along the way: only 1 of 32 pipeline job records has ever actually been drafted into
+a packet, not "6-8 of 32" as `plan.md` assumed going in.
+
+**No fix built yet** — next step (which finding(s) to act on) is pending user direction.
+
+## 2026-08-05 — Fixed the formulaic non-ask closing line in founder-outreach drafts
+
+**What:** `worker/src/founder-outreach.mjs` — rewrote the closing-ask prompt guidance (line 87) and
+the "Good example" closer (line 99) to require a specific tie-back to something raised earlier in
+the message, instead of the generic "happy to hop/jump on a call whenever works for you" the model
+was copying from the prompt's own illustrative text. Added those three phrase variants to the
+banned-phrase list and a new `GENERIC_CLOSER_PATTERN` code-level guard in `draftOutreachMessage`'s
+validation chain, mirroring the existing placeholder/generic-opener/em-dash guards.
+
+**Why:** finding 1 from the 2026-08-05 multi-persona quality-gate audit — 11/12 pending founder
+drafts converged on this exact closing line. User correctly challenged part of the audit's
+reasoning (cross-message detectability doesn't apply since no recipient sees more than their own
+message); the fix proceeded on the narrower, still-valid basis that the ask is weak within a single
+message regardless of repetition across the batch. Full reasoning in `docs/decisions.md`.
+
+**Files:** `worker/src/founder-outreach.mjs` (prompt + new pattern constant + validation chain),
+`worker/test/founder-outreach.test.mjs` (2 new tests: closer triggers regeneration, a genuinely
+specific closer passes untouched). 123/123 tests passing (up from 121).
+
+**Deployed:** `docker compose build worker && docker compose up -d worker`, container healthy. All
+12 pending founder drafts regenerated via `regenerateOne`; none triggered any guard, all spot-
+checked for a concrete, message-specific ask.

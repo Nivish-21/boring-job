@@ -79,6 +79,23 @@ test('draftOutreachMessage nulls out a message that uses a banned generic-opener
   assert.match(result.reason, /banned generic-opener phrase/);
 });
 
+test('draftOutreachMessage nulls out a message that uses a banned generic-closer phrase', async () => {
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({ message: 'Hi Jane, saw Nimbus is hiring, happy to hop on a call whenever works for you.', reason: 'Generic outreach' })
+  });
+  assert.equal(result.message, null);
+  assert.match(result.reason, /banned generic-closer phrase/);
+});
+
+test('draftOutreachMessage passes through a message with a genuinely specific closing ask', async () => {
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({ message: 'Hi Jane, saw Nimbus is hiring a Backend Engineer, would love to hear how you\'re thinking about scaling the team past this hire, got 15 minutes this week to swap notes?', reason: 'Role-specific outreach' })
+  });
+  assert.equal(result.message, 'Hi Jane, saw Nimbus is hiring a Backend Engineer, would love to hear how you\'re thinking about scaling the team past this hire, got 15 minutes this week to swap notes?');
+});
+
 test('draftOutreachMessage nulls out a message that uses an em dash', async () => {
   const result = await draftOutreachMessage({ founder }, {
     apiKey: 'sk-test',
