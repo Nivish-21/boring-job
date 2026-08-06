@@ -12,10 +12,19 @@ const hostnameOf = (url) => {
 
 const isJobBoardHost = (hostname) => Boolean(hostname) && JOB_BOARD_HOSTNAMES.some((board) => hostname === board || hostname.endsWith(`.${board}`));
 
+// Root cause of a live-reproduced bug: an exact `=== 'linkedin.com'` check rejects regional
+// subdomains (in.linkedin.com, no.linkedin.com, etc.), which real search results return often --
+// verified live twice, the correct top-ranked company page was on a regional subdomain both times
+// and got skipped in favour of an unrelated company sitting on the bare domain (iedeo's real page
+// at in.linkedin.com/company/iedeo lost to linkedin.com/company/ideo; Truweight/Possible's real
+// page at in.linkedin.com/company/truweight lost to linkedin.com/company/possible-finance). Same
+// subdomain-inclusive pattern as isJobBoardHost above.
 const isLinkedInCompanyUrl = (url) => {
   try {
     const parsed = new URL(url);
-    return hostnameOf(url) === 'linkedin.com' && parsed.pathname.startsWith('/company/');
+    const hostname = hostnameOf(url);
+    const isLinkedInHost = hostname === 'linkedin.com' || hostname?.endsWith('.linkedin.com');
+    return isLinkedInHost && parsed.pathname.startsWith('/company/');
   } catch {
     return false;
   }

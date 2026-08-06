@@ -49,6 +49,20 @@ test('degrades gracefully to nulls when both Firecrawl searches fail', async () 
   assert.deepEqual(result, { website_url: null, linkedin_url: null });
 });
 
+test('picks a regional linkedin subdomain (e.g. in.linkedin.com) over a bare-domain match ranked lower', async () => {
+  const result = await lookupCompany('iedeo', {
+    apiKey: 'fc-test',
+    fetchImpl: respondFor(
+      [],
+      [
+        { url: 'https://in.linkedin.com/company/iedeo', title: 'iedeo | LinkedIn' },
+        { url: 'https://www.linkedin.com/company/ideo', title: 'IDEO | LinkedIn' }
+      ]
+    )
+  });
+  assert.equal(result.linkedin_url, 'https://in.linkedin.com/company/iedeo');
+});
+
 test('returns nulls when no result passes the filter', async () => {
   const result = await lookupCompany('Acme Robotics', {
     apiKey: 'fc-test',

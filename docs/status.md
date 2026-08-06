@@ -271,10 +271,20 @@ phrases ("swap notes", "compare notes", "pick your brain", "hear how you're thin
 153/153 tests passing. Live-verified against 3 real founders — all 3 now lead with a concrete
 offer before the ask. Committed and pushed.
 
-**Still open, next-session pointer:** the `company-lookup.mjs` wrong-company-match bug (confirmed
-recurring, non-deterministic across sessions) has not been investigated — root cause unknown.
-Also still open: no dashboard observability for the LinkedIn-posts fetch outcome. Neither is
-blocking; both need explicit direction before starting.
+**Update, same session:** user approved investigating the company-lookup bug. Root cause found via
+`superpowers:systematic-debugging` and reproduced live twice (iedeo, Possible/Truweight): an exact
+`hostname === 'linkedin.com'` check in `isLinkedInCompanyUrl` was rejecting valid regional
+subdomains (`in.linkedin.com`), causing the correct top-ranked result to be skipped for a
+lower-ranked wrong company on the bare domain. Fixed to accept any `*.linkedin.com` subdomain
+(mirrors `isJobBoardHost`'s existing pattern in the same file). 154/154 tests passing,
+live-verified post-fix — both cases now resolve correctly. Committed and pushed.
+
+**Still open, next-session pointer:** Playroot Golf's *website* mismatch (`talamoregolfresort.com`)
+is a different bug class — a search-relevance problem, not a hostname bug — and was deliberately
+NOT fixed in the same change (would need a name-similarity/content-verification heuristic with
+real false-negative risk; needs a design decision, not just a fix). Also still open: no dashboard
+observability for the LinkedIn-posts fetch outcome. Neither is blocking; both need explicit
+direction before starting.
 
 Built: rewrote both prompt locations that handed the model the exact banned phrase as its own
 "good example," added the phrase variants to the banned-phrase list, added a code-level
