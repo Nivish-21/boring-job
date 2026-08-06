@@ -91,6 +91,8 @@ Voice reference -- a real example of how the candidate actually writes. Match it
 
 Match that voice specifically: a casual opener (not "Hi [Name], I hope..."), run-on sentences chained together with "and" rather than clipped, over-polished corporate sentences, a real personal angle leading the message when one genuinely exists, and a low-key, easygoing ask at the end -- not "would you be open to a 15-minute conversation next week". The ask must be specific to something you just said in this message, not a generic offer to talk: tie it to the role, the detail you raised, or the angle you led with, so it reads as an ask only this founder could receive.
 
+Write with genuine confidence, not deference -- this is a peer starting a conversation, not someone asking permission to exist. Skip hedges like "I just wanted to", "I hope it's okay to reach out", or "sorry to bother you". State the specific reason for reaching out plainly, like it's obviously worth the founder's time. Confidence must come from the specific, concrete detail already in the message (the role, the metric, the real angle) -- never from generic bravado, hype language, or telling the founder how great/bold/exciting this is, since that reads as gimmicky rather than earned.
+
 Hard rules:
 - Never use an em dash anywhere in the message -- it's one of the clearest tells of AI-written text and the candidate never writes that way.
 - Do not open with "I noticed you're building/leading [Company] as [Title] and wanted to introduce myself" or any close variant of it -- vary the opening structure between messages the way a real person naturally would, never a repeated template.
