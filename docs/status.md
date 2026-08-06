@@ -395,3 +395,29 @@ the real 32 packets — that step is explicitly the user's to run and verify.
    bigger batch is wanted.
 3. Turn on `DISCOVERY_SCHEDULE_ENABLED` for real unattended daily job-discovery runs, whenever
    the user wants that (currently off; manual trigger via `POST /api/discovery/run` still works).
+
+## Session 6 closing (2026-08-06) — next-session pointer
+
+Everything from Session 6 (voice confidence pass, LinkedIn-posts founder context, the reciprocity
+fix, and the company-lookup subdomain fix — full detail above) is **committed and pushed**:
+`386c247` → `6c7d3c2` → `98e1702` → `6f7724f`, all on `origin/main`. Working tree is otherwise
+clean except the pre-existing, separate job-packet fact-selector/regenerate-mechanism work from
+Session 4 above, which this session deliberately did not touch and remains uncommitted exactly as
+Session 4 left it — pick that up separately using its own "Next session" pointer, not this one.
+
+**Open items from today, not yet actioned, need explicit direction before starting:**
+1. Playroot Golf's *website* mismatch (`talamoregolfresort.com`) — a search-relevance bug, not the
+   hostname bug just fixed. No fix proposed; needs a design decision on how to add relevance
+   checking without over-rejecting legitimately-different-titled correct results.
+2. No dashboard observability for the LinkedIn-posts fetch outcome (ran-and-found-nothing vs.
+   failed-silently vs. never-configured all look identical to a human reviewer).
+3. Repo-wide: no `.prettierrc` committed, so `prettier --check` fails on every file including
+   pre-existing untouched code — flagged as a one-time housekeeping fix (add a `.prettierrc`
+   matching the existing single-quote/wide-line convention), not yet actioned.
+4. The LinkedIn-posts feature's actual content-injection path (a founder's real posts shaping a
+   draft) has only been observed in mocked unit tests — no founder tested live so far has had
+   recent-enough posts to exercise it for real. Worth revisiting once a real hit occurs naturally
+   through normal use, not worth manufacturing a special case to force one.
+
+**Do not re-derive any of the above** — this file plus `docs/plan.md`/`docs/decisions.md`/
+`docs/changelog.md` (local-only, not pushed) have the full reasoning for each.
