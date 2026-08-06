@@ -454,4 +454,32 @@ hook bypass. Full reasoning in `docs/decisions.md`.
 Fixed the LinkedIn-posts observability gap flagged earlier: `scrapeFounderPosts` now returns
 `{ context, status }`, and a human-readable note per status (used/not-configured/none-found/
 all-stale/fetch-failed) is appended to the review item's summary. 159/159 tests passing,
-live-verified against a real founder. Not yet committed — next action is to commit and push.
+live-verified against a real founder. Committed and pushed (`f293756`).
+
+## Session close (2026-08-07) — user wants this thread wrapped up next session, not extended further
+
+Everything through `f293756` is committed and pushed, working tree clean. Full list of what
+shipped this thread (session 6, spanning two calendar days): founder-outreach voice confidence
+pass, LinkedIn-posts founder context (Apify), the reciprocity/ask fix, the company-lookup
+regional-subdomain fix, the complete job-packet fact-selector + regenerate mechanism (finishing
+work paused since session 4/5), a Prettier baseline config, and LinkedIn-posts fetch observability.
+
+**User's explicit instruction for next session: end this thread, don't keep extending it.** Do not
+open with "what's next" or surface more incremental follow-ups by default — the standing open
+items below are optional, not a backlog to work through one-by-one. Confirm with the user up front
+whether they want closure (final review pass, deploy, done) or a specific new thing, rather than
+assuming either.
+
+**Standing open items, unresolved, listed for completeness only:**
+1. Playroot Golf website-relevance mismatch (`company-lookup.mjs`) — needs a design decision on a
+   name-similarity heuristic; not started.
+2. `docker compose up -d --build` has not been run — none of today's or session 4/5's fixes are
+   live in the actual running container yet. This is the biggest real gap: a lot of verified code
+   changes, zero of it deployed.
+3. The README's reprocess loop for the 32 existing job packets has not been run.
+4. The LinkedIn-posts content-injection path (a real founder's posts actually shaping a draft) has
+   still only been observed in unit tests, never live — no founder tested so far had recent
+   enough posts.
+
+**If the goal tomorrow is genuinely to close this out:** item 2 (deploy) is the one that actually
+matters — everything else is enhancement on top of code that isn't even running yet.
