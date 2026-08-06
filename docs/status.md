@@ -421,3 +421,22 @@ Session 4 left it — pick that up separately using its own "Next session" point
 
 **Do not re-derive any of the above** — this file plus `docs/plan.md`/`docs/decisions.md`/
 `docs/changelog.md` (local-only, not pushed) have the full reasoning for each.
+
+## Same day, continued — finished the job-packet regenerate mechanism (2026-08-06)
+
+User chose to keep building rather than stop for the day. Picked up the pre-approved,
+partially-built job-packet regenerate mechanism from session 4/5 (design already approved,
+`JobPipeline.regenerateOne` already built and tested) and finished the rest: `server.mjs` route,
+`app.js` dashboard wiring (the "Regenerate" button on job cards was already visible, it just
+silently did the wrong thing before — flipped status without redrafting), server tests, and a new
+`README.md` section documenting the endpoint plus a copy-pasteable reprocess loop. 157/157 tests
+passing. **Not committed yet** — awaiting confirmation before pushing.
+
+**Explicitly not done, by design:** the worker Docker image was not rebuilt/deployed (Docker
+wasn't running this session), and the actual reprocess of the 32 existing placeholder packets was
+not run — both remain the user's own action per the standing approved scope from session 4/5.
+
+**Next session pointer:** once pushed, the user needs to (1) `docker compose up -d --build` to
+deploy this and the earlier fact-selector fix together (neither is live in the running container
+yet), then (2) run the README's reprocess loop themselves against the real 32 packets and
+spot-check output.

@@ -288,6 +288,219 @@ test('includes a capped reference-resume excerpt when the matched bucket has ext
   }
 });
 
+test('defaultCandidate name flows through to the draft when no explicit candidate is given', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob,
+    defaultCandidate: { name: 'Nivish' }
+  });
+
+  try {
+    const result = await pipeline.process({ source_url: verifiedJob.source_url });
+    const artifact = await readFile(result.artifact_path, 'utf8');
+    assert.match(artifact, /I'm Nivish\./);
+    assert.doesNotMatch(artifact, /I'm Candidate\./);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('factSelector only fires when no facts already present and a resumeBucket matched', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const buckets = [{ id: '01', target_role: 'Backend Software Engineer', reference_text: 'Built production Node.js APIs.' }];
+  let factSelectorCalls = 0;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob,
+    resumeBuckets: buckets,
+    resumeClassifier: async () => ({ bucket_id: '01', confidence: 0.9, reason: 'Strong match' }),
+    factSelector: async () => { factSelectorCalls += 1; return { facts: ['Built production Node.js APIs.'], reason: 'match' }; }
+  });
+
+  try {
+    const result = await pipeline.process({ source_url: verifiedJob.source_url });
+    assert.equal(factSelectorCalls, 1);
+    const artifact = await readFile(result.artifact_path, 'utf8');
+    assert.match(artifact, /Built production Node\.js APIs\./);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('factSelector does not fire when no resumeBucket matched', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  let factSelectorCalls = 0;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob,
+    factSelector: async () => { factSelectorCalls += 1; return { facts: ['should never be called'], reason: 'x' }; }
+  });
+
+  try {
+    await pipeline.process({ source_url: verifiedJob.source_url });
+    assert.equal(factSelectorCalls, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('an explicitly-passed candidate with its own verified_facts is never overridden by factSelector', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const buckets = [{ id: '01', target_role: 'Backend Software Engineer', reference_text: 'Built production Node.js APIs.' }];
+  let factSelectorCalls = 0;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob,
+    resumeBuckets: buckets,
+    resumeClassifier: async () => ({ bucket_id: '01', confidence: 0.9, reason: 'Strong match' }),
+    factSelector: async () => { factSelectorCalls += 1; return { facts: ['should never be used'], reason: 'x' }; }
+  });
+
+  try {
+    const result = await pipeline.process({ source_url: verifiedJob.source_url, candidate: { name: 'Nivish', verified_facts: ['Explicit fact.'] } });
+    assert.equal(factSelectorCalls, 0);
+    const artifact = await readFile(result.artifact_path, 'utf8');
+    assert.match(artifact, /Explicit fact\./);
+    assert.doesNotMatch(artifact, /should never be used/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('an explicit candidate name overrides defaultCandidate name', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob,
+    defaultCandidate: { name: 'Default Name' }
+  });
+
+  try {
+    const result = await pipeline.process({ source_url: verifiedJob.source_url, candidate: { name: 'Explicit Name' } });
+    const artifact = await readFile(result.artifact_path, 'utf8');
+    assert.match(artifact, /I'm Explicit Name\./);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('regenerateOne throws for an unknown stable_id', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const pipeline = new JobPipeline({ store: pipelineStore, reviewStore, artifactDir: join(root, 'artifacts'), verify: async () => verifiedJob });
+
+  try {
+    await assert.rejects(() => pipeline.regenerateOne('greenhouse:nope:1'), /job not found/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('regenerateOne throws when the job is no longer live', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  let verifyCalls = 0;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => { verifyCalls += 1; return verifyCalls === 1 ? verifiedJob : { liveness: 'closed', verification_status: 'checked', source_url: verifiedJob.source_url }; }
+  });
+
+  try {
+    await pipeline.process({ source_url: verifiedJob.source_url });
+    await assert.rejects(() => pipeline.regenerateOne(verifiedJob.job.stable_id), /no longer live/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('regenerateOne rejects the stale pending review item and drafts a fresh one with new facts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const buckets = [{ id: '01', target_role: 'Backend Software Engineer', reference_text: 'Built production Node.js APIs.' }];
+  let factCallCount = 0;
+  const pipeline = new JobPipeline({
+    store: pipelineStore,
+    reviewStore,
+    artifactDir: join(root, 'artifacts'),
+    verify: async () => verifiedJob,
+    resumeBuckets: buckets,
+    resumeClassifier: async () => ({ bucket_id: '01', confidence: 0.9, reason: 'Strong match' }),
+    defaultCandidate: { name: 'Nivish' },
+    factSelector: async () => { factCallCount += 1; return { facts: [`Regenerated fact ${factCallCount}.`], reason: 'match' }; }
+  });
+
+  try {
+    const first = await pipeline.process({ source_url: verifiedJob.source_url });
+    assert.equal(first.review.status, 'pending');
+
+    const regenerated = await pipeline.regenerateOne(verifiedJob.job.stable_id);
+    assert.equal(regenerated.stage, 'needs_review');
+    assert.notEqual(regenerated.review.id, first.review.id);
+
+    const oldItem = (await reviewStore.list({})).find((item) => item.id === first.review.id);
+    assert.equal(oldItem.status, 'rejected');
+
+    const artifact = await readFile(regenerated.artifact_path, 'utf8');
+    assert.match(artifact, /Regenerated fact 2\./);
+    assert.match(artifact, /I'm Nivish\./);
+
+    const record = await pipelineStore.getByStableId(verifiedJob.job.stable_id);
+    assert.equal(record.review_item_id, regenerated.review.id);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('regenerateOne bypasses the daily cap', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
+  const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));
+  const reviewStore = new ReviewStore(join(root, 'review.json'));
+  await Promise.all([pipelineStore.initialize(), reviewStore.initialize()]);
+  const pipeline = new JobPipeline({ store: pipelineStore, reviewStore, artifactDir: join(root, 'artifacts'), verify: async () => verifiedJob, dailyCap: 0 });
+
+  try {
+    await pipelineStore.record({ stable_id: verifiedJob.job.stable_id, status: 'needs_review', source_url: verifiedJob.job.source_url });
+    const result = await pipeline.regenerateOne(verifiedJob.job.stable_id);
+    assert.equal(result.stage, 'needs_review');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('companyName falls back to a hostname-derived guess for discovered (non-ATS) postings', async () => {
   const root = await mkdtemp(join(tmpdir(), 'career-ops-pipeline-'));
   const pipelineStore = new PipelineStore(join(root, 'pipeline.json'));

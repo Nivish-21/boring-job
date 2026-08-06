@@ -180,6 +180,49 @@ Generated review packets are written to the worker artifact volume. The caller
 must still use the review dashboard to record an explicit decision; approval is
 not a submit action.
 
+## Regenerating a job packet
+
+`POST /api/pipeline/jobs/:stableId/regenerate` redrafts a single already-processed job packet
+from scratch: it rejects the old pending review item (if any), re-verifies the posting is still
+live, re-runs fit evaluation/company lookup/resume matching, and creates a fresh review item. Use
+it when a packet is stuck with a placeholder name, stale facts, or any other reason you want a new
+draft without re-running the whole daily pipeline.
+
+```sh
+curl -X POST http://localhost:8080/api/pipeline/jobs/STABLE_ID/regenerate
+```
+
+`STABLE_ID` is the `stable_id` field on the job record (visible via `GET /api/pipeline/jobs` or in
+the dashboard). If the posting is no longer live, this returns an error instead of drafting an
+application for a dead job — that's by design, not a bug.
+
+### Reprocessing all existing packets after the fact-selector fix
+
+Packets generated before the candidate-fact-selector fix landed carry the placeholder name
+`"Candidate"` and no real facts, because nothing populated the candidate object before that fix.
+Set `CANDIDATE_NAME` in `.env` and confirm `OPENAI_API_KEY` is set, then rebuild
+(`docker compose up -d --build`) so both fixes are live. To reprocess every packet stuck in
+`needs_review`, list them and call the regenerate endpoint for each:
+
+```sh
+curl -s http://localhost:8080/api/pipeline/jobs?status=needs_review \
+  | jq -r '.jobs[].stable_id' \
+  | while read -r stable_id; do
+      echo "Regenerating $stable_id..."
+      curl -s -X POST "http://localhost:8080/api/pipeline/jobs/$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$stable_id")/regenerate" \
+        | jq '{stable_id: $stable_id, ok, error}' --arg stable_id "$stable_id"
+      sleep 1
+    done
+```
+
+A posting that's gone dead since it was first discovered will fail to regenerate (expected — you
+can't draft an application for a job that no longer exists); skip it and move on rather than
+treating it as a script failure. After running this, spot-check a sample of the regenerated
+packets in the review dashboard for a real name and real, grounded facts.
+
+This step spends real OpenAI/Firecrawl/Apify credits per packet (the same cost as a normal
+pipeline run) — run it deliberately, not as part of every deploy.
+
 ## Not implemented yet
 
 - Notion credentials/property mapping and production workflow

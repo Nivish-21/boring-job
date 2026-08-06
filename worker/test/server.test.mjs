@@ -286,6 +286,58 @@ test('returns 503 from the founder-regenerate endpoint when no founder outreach 
   }
 });
 
+test('runs the job pipeline regenerate endpoint through the injected pipeline', async () => {
+  const store = { list: async () => [] };
+  let receivedStableId = null;
+  const pipeline = {
+    regenerateOne: async (stableId) => { receivedStableId = stableId; return { stage: 'needs_review', review: { id: 'review-3', draft: 'Job packet draft...' } }; }
+  };
+  const server = await start({ store, pipeline, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const response = await call(server, {
+      method: 'POST',
+      path: `/api/pipeline/jobs/${encodeURIComponent('greenhouse:acme:123')}/regenerate`
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { ok: true, item: { id: 'review-3', draft: 'Job packet draft...' } });
+    assert.equal(receivedStableId, 'greenhouse:acme:123');
+  } finally {
+    await close(server);
+  }
+});
+
+test('returns 404 from the job pipeline regenerate endpoint for an unknown stable_id', async () => {
+  const store = { list: async () => [] };
+  const pipeline = { regenerateOne: async () => { throw new Error('job not found for this stable_id'); } };
+  const server = await start({ store, pipeline, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const response = await call(server, {
+      method: 'POST',
+      path: `/api/pipeline/jobs/${encodeURIComponent('unknown:stable:id')}/regenerate`
+    });
+    assert.equal(response.status, 404);
+  } finally {
+    await close(server);
+  }
+});
+
+test('returns 503 from the job pipeline regenerate endpoint when no pipeline is configured', async () => {
+  const store = { list: async () => [] };
+  const server = await start({ store, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });
+
+  try {
+    const response = await call(server, {
+      method: 'POST',
+      path: `/api/pipeline/jobs/${encodeURIComponent('greenhouse:acme:123')}/regenerate`
+    });
+    assert.equal(response.status, 503);
+  } finally {
+    await close(server);
+  }
+});
+
 test('returns firecrawl/apify usage errors without either key configured, with no network call', async () => {
   const store = { list: async () => [] };
   const server = await start({ store, artifactDir: '/tmp/artifacts', auth: { user: '', password: '' } });

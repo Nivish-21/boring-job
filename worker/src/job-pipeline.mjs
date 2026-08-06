@@ -74,8 +74,8 @@ const packetDraft = (job, evaluation, candidate, { resumeBucket, companyLinks } 
 };
 
 export class JobPipeline {
-  constructor({ store, reviewStore, artifactDir, verify = verifyJob, verifyFallback = null, resumeClassifier = null, resumeBuckets = [], companyLookup = null, dailyCap = 20 }) {
-    Object.assign(this, { store, reviewStore, artifactDir, verify, verifyFallback, resumeClassifier, resumeBuckets, companyLookup, dailyCap });
+  constructor({ store, reviewStore, artifactDir, verify = verifyJob, verifyFallback = null, resumeClassifier = null, resumeBuckets = [], companyLookup = null, dailyCap = 20, defaultCandidate = null, factSelector = null }) {
+    Object.assign(this, { store, reviewStore, artifactDir, verify, verifyFallback, resumeClassifier, resumeBuckets, companyLookup, dailyCap, defaultCandidate, factSelector });
   }
   async process({ source_url: sourceUrl, candidate } = {}) {
     // Reject known aggregator/job-board hub pages before spending anything -- they're category
@@ -125,17 +125,64 @@ export class JobPipeline {
       return { stage: 'daily_cap_reached', verification, evaluation, record };
     }
 
+    const { review, artifactPath, record } = await this.#draft(verification, evaluation, companyLinks, candidate, listingFields);
+    return { stage: 'needs_review', verification, evaluation, artifact_path: artifactPath, review, record };
+  }
+
+  // Redrafts a single already-processed job -- for a stuck placeholder draft, a stale fact set,
+  // or any other reason a human wants a fresh packet without re-running the whole daily pipeline.
+  // Bypasses process()'s dedupe/skip/daily-cap checks entirely (they protect bulk discovery, not a
+  // targeted single-item retry) -- same precedent as FounderOutreachRunner.regenerateOne (see
+  // docs/decisions.md). Re-verifies and re-evaluates from scratch rather than trusting the stored
+  // record, so a posting that has gone dead since it was first discovered fails loudly instead of
+  // drafting an application for a job that no longer exists.
+  async regenerateOne(stableId) {
+    const existing = await this.store.getByStableId(stableId);
+    if (!existing) throw new Error('job not found for this stable_id');
+
+    if (existing.review_item_id) {
+      const items = await this.reviewStore.list({});
+      const oldItem = items.find((item) => item.id === existing.review_item_id);
+      if (oldItem && oldItem.status === 'pending') {
+        await this.reviewStore.decide(oldItem.id, { action: 'reject', approval_id: oldItem.approval_id, actor: 'system', reason: 'Superseded by regenerated draft' });
+      }
+    }
+
+    let verification = await this.verify(existing.source_url);
+    if (verification.liveness === 'unverified' && this.verifyFallback) {
+      verification = await this.verifyFallback(existing.source_url);
+    }
+    if (verification.liveness !== 'live') throw new Error(`cannot regenerate: job is no longer live (${verification.liveness})`);
+
+    const evaluation = evaluateJob(verification.job);
+    const companyLinks = this.companyLookup ? await this.companyLookup(companyName(verification)) : null;
+    const listingFields = { title: verification.job.title, location: verification.job.location, company: companyName(verification), company_links: companyLinks };
+
+    const { review, artifactPath, record } = await this.#draft(verification, evaluation, companyLinks, null, listingFields);
+    return { stage: 'needs_review', verification, evaluation, artifact_path: artifactPath, review, record };
+  }
+
+  async #draft(verification, evaluation, companyLinks, candidate, listingFields) {
     const resumeMatch = this.resumeClassifier && this.resumeBuckets.length
       ? await this.resumeClassifier(verification.job, this.resumeBuckets)
       : null;
     const resumeBucket = resumeMatch?.bucket_id ? this.resumeBuckets.find((bucket) => bucket.id === resumeMatch.bucket_id) : null;
 
+    // Explicit candidate always wins over defaultCandidate -- a caller that supplies its own name
+    // or facts is never overridden. factSelector only fires when nothing already supplied
+    // verified_facts and a resumeBucket actually matched (nothing to extract facts from otherwise).
+    const mergedCandidate = { ...(this.defaultCandidate || {}), ...(candidate || {}) };
+    if (this.factSelector && resumeBucket && !mergedCandidate.verified_facts) {
+      const factResult = await this.factSelector(verification.job, resumeBucket);
+      if (factResult?.facts?.length) mergedCandidate.verified_facts = factResult.facts;
+    }
+
     await mkdir(this.artifactDir, { recursive: true });
     const artifactPath = join(this.artifactDir, `packet-${randomUUID()}.md`);
-    const draft = packetDraft(verification.job, evaluation, candidate, { resumeBucket, companyLinks });
+    const draft = packetDraft(verification.job, evaluation, mergedCandidate, { resumeBucket, companyLinks });
     await writeFile(artifactPath, draft, { encoding: 'utf8', mode: 0o600 });
     const review = await this.reviewStore.create({ item_id: verification.job.stable_id, kind: 'job', title: `${verification.job.title || 'Untitled role'} — ${companyName(verification)}`, source_url: verification.job.source_url, summary: `${evaluation.reason} Location: ${evaluation.location_status}. This draft requires human review before any application action.`, draft, fit_score: evaluation.fit_score, evidence: evaluation.evidence });
     const record = await this.store.record({ stable_id: verification.job.stable_id, status: 'needs_review', source_url: verification.job.source_url, artifact_path: artifactPath, review_item_id: review.id, evaluation, ...listingFields });
-    return { stage: 'needs_review', verification, evaluation, artifact_path: artifactPath, review, record };
+    return { review, artifactPath, record };
   }
 }

@@ -144,6 +144,12 @@ export const createApp = ({ store, pipeline, pipelineStore, discoveryRunner, fou
       const item = await founderOutreachRunner.regenerateOne(decodeURIComponent(regenerateMatch[1]));
       return sendJson(res, 200, { ok: true, item });
     }
+    const jobRegenerateMatch = url.pathname.match(/^\/api\/pipeline\/jobs\/([^/]+)\/regenerate$/);
+    if (req.method === 'POST' && jobRegenerateMatch) {
+      if (!pipeline) return sendJson(res, 503, { ok: false, error: 'job pipeline is unavailable' });
+      const result = await pipeline.regenerateOne(decodeURIComponent(jobRegenerateMatch[1]));
+      return sendJson(res, 200, { ok: true, item: result.review });
+    }
     if (req.method === 'GET' && url.pathname === '/api/usage') {
       const [firecrawl, apify] = await Promise.all([
         getFirecrawlUsage({ apiKey: firecrawlApiKey }),
