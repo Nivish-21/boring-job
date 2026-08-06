@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: 2026-08-05 (session 4)_
+_Last updated: 2026-08-06 (session 6)_
 
 **Note (2026-08-05):** `docs/changelog.md`, `docs/decisions.md`, `docs/lessons.md`, and
 `docs/plan.md` are local-only from this point on (untracked, gitignored) — user's explicit call,
@@ -28,7 +28,9 @@ live against the real API, not assumed). Drafts are direct messages to existing 
 connections (no fixed length target, ~8,000-char safety backstop only — not the 300-char
 connection-request-note limit, a mistake caught and fixed 2026-08-05) and match a real voice
 sample the user provided, with code-level guards against placeholders, banned generic-opener
-phrases, and em dashes. 121/121 tests passing; `docker compose config --quiet` validates clean.
+phrases, and em dashes. A LinkedIn-posts founder-context feature (via Apify, no cookies/login
+needed) is built, tested, and live-verified but **not yet committed** — see Session 6 below.
+152/152 tests passing; `docker compose config --quiet` validates clean.
 
 ## Active plan — founder-outreach: dashboard fixed, regenerate path built, char-limit fixed, voice matched — all live-verified (2026-08-05)
 
@@ -215,6 +217,56 @@ detectability angle doesn't hold. Re-justified the fix on a narrower, still-vali
 (weak ask *within* a single message, regardless of repetition) — full reasoning in
 `docs/decisions.md`. User approved proceeding on the corrected framing.
 
+## Session 6 (2026-08-06) — voice confidence pass + LinkedIn-posts founder context, shipped and tested
+
+**Voice confidence fix (shipped, committed, pushed — `386c247`):** user shared a LinkedIn post
+(Vardaan Vig, on founder-outreach DM strategy) as inspiration. Compared it against the current
+prompt, verified the fit/gap with 3 independent subagent tone reviews, then updated the prompt to
+drop deferential hedging and write with plain confidence (never generic bravado). Pushed alone —
+the separate, already-in-progress job-packet fact-selector work (see block above) was deliberately
+left uncommitted/unpushed, not bundled in.
+
+**LinkedIn-posts founder context (built, tested, live-verified, NOT yet committed):** new feature
+feeding a founder's own recent (12-month) public LinkedIn posts into the outreach draft as
+tone/mindset signal. Firecrawl was tried first and outright refuses linkedin.com (verified live) —
+switched to Apify's `harvestapi~linkedin-profile-posts` actor, verified live to require no
+cookies/login (no risk to the user's own LinkedIn account) and to return genuine full post history,
+not a truncated stub (a `maxPosts:0` test call returned 22 real posts, 2015-2021, for one profile —
+confirms an empty/stale result elsewhere is a real signal, not a scraper bug). Full design in
+`docs/plan.md`. 152/152 tests passing.
+
+**Live test methodology (user-specified):** 5 independent subagents each regenerated one real
+founder's draft through the new pipeline; 5 separate independent subagents then critiqued all 5
+drafts, explicitly benchmarked against the user's Vardaan Vig reference post/DM. Result: feature
+plumbing is correct (all 5 tested founders had no recent posts, so all 5 correctly took the
+null-context path — the "posts actually shape the draft" path is still only unit-tested, not yet
+observed live). Independent of this feature, all 5 critics converged: drafts score 2-4/10 against
+the Vardaan standard specifically, because the closing ask is one-way extraction ("swap notes")
+with no reciprocity, versus the standard's explicit two-way trade ("a piece of my time for a piece
+of yours") and audacious framing ("let me build it with you"). This is the same defect the
+session-2 audit already found (formulaic weak ask) — unrelated to today's feature, still open.
+
+**Two bugs surfaced (pre-existing, not caused by today's feature) — not fixed, follow-up only:**
+- `company-lookup.mjs` wrong-company matches, reconfirmed on new data: Playroot Golf's website
+  resolved to "Talamore Golf Resort" (a *different* wrong domain than session 2's `golfroots.com`
+  finding for the same founder — the mismatch is non-deterministic, not a single stale/flaky
+  result, which is a stronger signal of a real matching-logic defect). iedeo's LinkedIn resolved to
+  `linkedin.com/company/ideo` (IDEO the design firm).
+- No dashboard observability distinguishing "LinkedIn-posts fetch ran, found nothing" from "fetch
+  failed silently" from "Apify not configured" — all look identical to a human reviewer.
+
+**Also corrected this session:** an earlier Prettier check on `founder-outreach.mjs` was reported
+as passing when it wasn't — the `[warn]` line was on stderr and got dropped from that tool output.
+Rechecked properly: this entire repo fails `prettier --check` by default (no `.prettierrc`
+committed, and the codebase's real convention — single quotes, wider lines — doesn't match
+Prettier's defaults). Left formatting alone rather than reformat the whole file against its own
+established style; flagged adding a matching `.prettierrc` as a separate one-time follow-up.
+
+**Not yet done / next-session pointer:** the LinkedIn-posts feature code is built and tested but
+**not committed or pushed** — awaiting user go-ahead. The reciprocity/ask-quality fix and the two
+newly-reconfirmed bugs are flagged, not fixed — need explicit direction on priority order before
+touching more code.
+
 Built: rewrote both prompt locations that handed the model the exact banned phrase as its own
 "good example," added the phrase variants to the banned-phrase list, added a code-level
 `GENERIC_CLOSER_PATTERN` guard (same principle as the placeholder/generic-opener/em-dash guards).
@@ -238,15 +290,80 @@ Two things happened this session, no application code touched:
    quality-gate audit) — added a resume note there confirming the audit surfaced nothing that
    changes the design, and that it's **awaiting a "go" to execute**, not yet started.
 
-## Next session: pick up directly with the job-packet fact-selector fix
+## Session 5 (2026-08-05) — job-packet fact-selector fix built, tested, logged; regenerate/reprocess not started
 
-**Do not re-derive or re-plan this** — `docs/plan.md`, the "fix placeholder 'Candidate' name and
-empty facts stub in job packets" block, has the full approved step list plus a 2026-08-05
-session-4 resume note. Open by confirming the user still wants to go ahead with it (last state:
-plan written, not yet approved to execute), then execute in order:
-`fit-evaluator.mjs` → `job-pipeline.mjs` → `server.mjs` → `.env.example` → tests → reprocess the 32
-existing job packets (a regenerate mechanism needs building first, flagged as a known gap inside
-that same block) → log.
+User said "continue the plan," taken as the go-ahead for the already-written, approved-in-principle
+"fix placeholder 'Candidate' name and empty facts stub in job packets" block. Executed the core fix:
+
+- `fit-evaluator.mjs`: added `selectVerifiedFacts(job, resumeBucket, {apiKey, fetchImpl, model})`,
+  mirroring `classifyResumeBucket`'s exact shape (gpt-4o-mini, `temperature: 0`, `response_format:
+  json_object`, degrades to `{facts: [], reason}` on any failure, never throws).
+- `job-pipeline.mjs`: `JobPipeline` gains `defaultCandidate`/`factSelector` (both default `null`);
+  `process()` merges `defaultCandidate` with any explicit `candidate` (explicit always wins via
+  object-spread order — see `docs/decisions.md`), calls `factSelector` only when the merged
+  candidate has no `verified_facts` yet and a `resumeBucket` matched. `packetDraft()` itself
+  untouched.
+- `server.mjs` / `.env.example`: new `CANDIDATE_NAME` env var (unset degrades to the existing
+  `'Candidate'` fallback), wired as `defaultCandidate`; `factSelector` wired to
+  `selectVerifiedFacts`.
+- Tests: 9 new in `fit-evaluator.test.mjs`, 5 new in `job-pipeline.test.mjs`. **136/136 passing**
+  (up from 122). `docker compose config --quiet` validates clean. No repo-wide Prettier/ESLint
+  config exists — checked `npx prettier --check` against both new and pre-existing untouched files
+  and confirmed the whole codebase (not just this change) predates/ignores default Prettier style,
+  so no reformat was forced.
+- Logged in `docs/changelog.md` and `docs/decisions.md`; `docs/plan.md` steps checked off.
+
+**Not built this session, not yet deployed:** the worker Docker image has **not** been rebuilt, so
+this fix is not live yet. Per plan.md's flagged "known limitation," there is still no regenerate
+mechanism for job packets (unlike founder-outreach's `regenerateOne`) — the 32 existing packets
+still carry the placeholder until something explicitly reprocesses them. The user separately
+approved reprocessing the existing packets too, but no concrete step list for *how* (a
+`regenerateOne`-style method on `JobPipeline`? a one-off script?) has been written or approved yet
+— needs its own written plan before building, same as every other block in `plan.md`.
+
+## Session 5 continued (2026-08-05) — regenerate mechanism partly built, not deployed, not reprocessed
+
+Same session, after the fact-selector fix above. User approved the design: mirror
+`FounderOutreachRunner.regenerateOne`, not a one-off script. Then gave an explicit scope split for
+the reprocess step specifically: **do not run it against the real 32 packets** — document the
+steps in `README.md` instead so the user runs it themselves and checks the output.
+
+**Built and test-verified:**
+- `JobPipeline.regenerateOne(stableId)` in `job-pipeline.mjs` — looks up the stored record, rejects
+  the stale pending review item (`reason: 'Superseded by regenerated draft'`), re-verifies the job
+  is still live (throws if not — by design, can't draft an application for a dead posting),
+  re-evaluates, re-looks-up the company, then redrafts via a new private `#draft()` helper. Bypasses
+  `process()`'s dedupe/skip/daily-cap checks entirely (they protect bulk daily discovery, not a
+  targeted single-item human retry — same precedent as founder-outreach's own `regenerateOne`).
+- Refactored the post-cap body of `process()` (resume classification → fact selection → write
+  artifact → create review item → record) into that shared private `#draft()` method, used by both
+  `process()` and `regenerateOne()`.
+- 4 new tests in `job-pipeline.test.mjs` (unknown stable_id throws, dead job throws, stale item
+  gets rejected and a fresh one created with new facts, daily cap is bypassed). **23/23
+  job-pipeline tests passing.**
+
+**Not built yet — full remaining step list is in `docs/plan.md`, "job-packet regenerate mechanism +
+reprocess the 32 existing packets" block (marked IN PROGRESS with a resume note):**
+- `POST /api/pipeline/jobs/:stableId/regenerate` route in `server.mjs` (mirrors the existing
+  founder-regenerate route)
+- Wiring the dashboard's job-card "Regenerate" button (`worker/public/app.js`) to the new route —
+  the button already exists and currently no-ops for job cards (see the comment at app.js line
+  152-155, written when founder-outreach's regenerate shipped, anticipating this)
+- Server-level tests for the new route (mirror the existing founder-regenerate route tests)
+- A `README.md` section documenting the steps to reprocess the 32 existing packets — **for the
+  user to run themselves and check output, not for this session/agent to run against real data**
+- Rebuild + deploy both this fix and the earlier fact-selector fix together (neither is live yet)
+
+Stopped here at ~80% context per the session-hygiene hard rule, not because of a blocker.
+
+## Next session: pick up directly with the remaining regenerate-mechanism steps
+
+**Do not re-derive or re-plan this** — `docs/plan.md`'s block has the full step list and a
+resume note confirming exactly what's done vs. outstanding (matches the "Built and test-verified"
+list two paragraphs up). Open by confirming the user still wants to proceed, then execute in
+order: `server.mjs` route → `app.js` dashboard wiring → server tests → `README.md` reprocess
+section → full test suite → rebuild/deploy both fixes → log. Do **not** run the reprocess against
+the real 32 packets — that step is explicitly the user's to run and verify.
 
 **Still open, not part of the chosen task, no action taken:**
 1. Thin-company-research issue (4/12 founder drafts still read generically — Kunal M, Celiba

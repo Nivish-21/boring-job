@@ -96,6 +96,30 @@ test('draftOutreachMessage passes through a message with a genuinely specific cl
   assert.equal(result.message, 'Hi Jane, saw Nimbus is hiring a Backend Engineer, would love to hear how you\'re thinking about scaling the team past this hire, got 15 minutes this week to swap notes?');
 });
 
+test('draftOutreachMessage includes founderPostsContext in the prompt when given', async () => {
+  let capturedUserContent;
+  await draftOutreachMessage({ founder, founderPostsContext: 'Excited to announce our Series A' }, {
+    apiKey: 'sk-test',
+    fetchImpl: async (url, init) => {
+      capturedUserContent = JSON.parse(init.body).messages.find((message) => message.role === 'user').content;
+      return chatResponse({ message: 'Hi Jane', reason: '' })(url, init);
+    }
+  });
+  assert.match(capturedUserContent, /Excited to announce our Series A/);
+});
+
+test('draftOutreachMessage tells the model absence of recent posts is normal when founderPostsContext is not given', async () => {
+  let capturedUserContent;
+  await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: async (url, init) => {
+      capturedUserContent = JSON.parse(init.body).messages.find((message) => message.role === 'user').content;
+      return chatResponse({ message: 'Hi Jane', reason: '' })(url, init);
+    }
+  });
+  assert.match(capturedUserContent, /don't post regularly/);
+});
+
 test('draftOutreachMessage nulls out a message that uses an em dash', async () => {
   const result = await draftOutreachMessage({ founder }, {
     apiKey: 'sk-test',
@@ -288,6 +312,64 @@ test('run stops trying careers URLs at the first needs_review match', async () =
   await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
   assert.deepEqual(processed, ['https://acme.com/careers', 'https://boards.greenhouse.io/acme/jobs/1']);
   assert.equal(reviewStore.created[0].draft, 'role: Backend Engineer');
+});
+
+test('run fetches the founder\'s LinkedIn posts and filters out anything older than 12 months', async () => {
+  const founderStore = fakeFounderStore();
+  const reviewStore = fakeReviewStore();
+  const now = Date.now();
+  const recent = new Date(now - 30 * 24 * 60 * 60 * 1_000).toISOString();
+  const stale = new Date(now - 400 * 24 * 60 * 60 * 1_000).toISOString();
+  let capturedContext;
+  const runner = new FounderOutreachRunner({
+    founderStore,
+    reviewStore,
+    pipeline: { process: async () => ({ stage: 'skipped' }) },
+    lookupCompany: async () => ({ website_url: null, linkedin_url: null }),
+    findCareers: async () => [],
+    apifyApiToken: 'apify-test-token',
+    fetchImpl: async () => new Response(JSON.stringify([
+      { content: 'Stale post from over a year ago', postedAt: { date: stale } },
+      { content: 'Recent post about hiring', postedAt: { date: recent } }
+    ]), { status: 200 }),
+    draftMessage: async ({ founderPostsContext }) => { capturedContext = founderPostsContext; return { message: 'hi', reason: '' }; }
+  });
+  await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
+  assert.equal(capturedContext, 'Recent post about hiring');
+});
+
+test('run passes null founderPostsContext when the founder has no recent posts', async () => {
+  const founderStore = fakeFounderStore();
+  const reviewStore = fakeReviewStore();
+  let capturedContext = 'not set';
+  const runner = new FounderOutreachRunner({
+    founderStore,
+    reviewStore,
+    pipeline: { process: async () => ({ stage: 'skipped' }) },
+    lookupCompany: async () => ({ website_url: null, linkedin_url: null }),
+    findCareers: async () => [],
+    apifyApiToken: 'apify-test-token',
+    fetchImpl: async () => new Response(JSON.stringify([]), { status: 200 }),
+    draftMessage: async ({ founderPostsContext }) => { capturedContext = founderPostsContext; return { message: 'hi', reason: '' }; }
+  });
+  await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
+  assert.equal(capturedContext, null);
+});
+
+test('run degrades to null founderPostsContext without throwing when no apifyApiToken is configured', async () => {
+  const founderStore = fakeFounderStore();
+  const reviewStore = fakeReviewStore();
+  let capturedContext = 'not set';
+  const runner = new FounderOutreachRunner({
+    founderStore,
+    reviewStore,
+    pipeline: { process: async () => ({ stage: 'skipped' }) },
+    lookupCompany: async () => ({ website_url: null, linkedin_url: null }),
+    findCareers: async () => [],
+    draftMessage: async ({ founderPostsContext }) => { capturedContext = founderPostsContext; return { message: 'hi', reason: '' }; }
+  });
+  await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
+  assert.equal(capturedContext, null);
 });
 
 test('run always creates a review item and records the founder, even when drafting fails', async () => {

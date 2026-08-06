@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { apifyScrape } from '../src/apify-client.mjs';
+import { apifyScrape, fetchFounderPosts } from '../src/apify-client.mjs';
 
 test('apifyScrape posts to the default actor and maps the first dataset item', async () => {
   const result = await apifyScrape('https://acme.com/jobs/1', {
@@ -71,6 +71,86 @@ test('classifies HTTP error statuses for the circuit breaker', async () => {
 test('classifies an aborted request as a timeout', async () => {
   await assert.rejects(
     () => apifyScrape('https://acme.com/jobs/1', {
+      apiToken: 'apify-test-token',
+      fetchImpl: async () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+    }),
+    (error) => error.errorType === 'timeout' && error.message === 'Apify request timed out'
+  );
+});
+
+test('fetchFounderPosts posts to the harvestapi actor with targetUrls/maxPosts and maps content+postedAt', async () => {
+  const result = await fetchFounderPosts('https://www.linkedin.com/in/janedoe', {
+    apiToken: 'apify-test-token',
+    fetchImpl: async (url, init) => {
+      assert.equal(url, 'https://api.apify.com/v2/acts/harvestapi~linkedin-profile-posts/run-sync-get-dataset-items?token=apify-test-token');
+      assert.deepEqual(JSON.parse(init.body), { targetUrls: ['https://www.linkedin.com/in/janedoe'], maxPosts: 5 });
+      return new Response(JSON.stringify([
+        { content: '  Hiring a PM  ', postedAt: { date: '2026-01-01T00:00:00.000Z' } }
+      ]), { status: 200 });
+    }
+  });
+
+  assert.deepEqual(result, [{ content: 'Hiring a PM', postedAt: '2026-01-01T00:00:00.000Z' }]);
+});
+
+test('fetchFounderPosts respects a custom actorId and maxPosts', async () => {
+  await fetchFounderPosts('https://www.linkedin.com/in/janedoe', {
+    apiToken: 'apify-test-token',
+    actorId: 'custom~posts-actor',
+    maxPosts: 10,
+    fetchImpl: async (url, init) => {
+      assert.match(url, /^https:\/\/api\.apify\.com\/v2\/acts\/custom~posts-actor\/run-sync-get-dataset-items\?token=/);
+      assert.deepEqual(JSON.parse(init.body).maxPosts, 10);
+      return new Response(JSON.stringify([]), { status: 200 });
+    }
+  });
+});
+
+test('fetchFounderPosts filters out items with no usable content', async () => {
+  const result = await fetchFounderPosts('https://www.linkedin.com/in/janedoe', {
+    apiToken: 'apify-test-token',
+    fetchImpl: async () => new Response(JSON.stringify([
+      { content: '', postedAt: { date: '2026-01-01T00:00:00.000Z' } },
+      { postedAt: { date: '2026-01-01T00:00:00.000Z' } },
+      { content: 'Real post', postedAt: { date: '2026-01-02T00:00:00.000Z' } }
+    ]), { status: 200 })
+  });
+
+  assert.deepEqual(result, [{ content: 'Real post', postedAt: '2026-01-02T00:00:00.000Z' }]);
+});
+
+test('fetchFounderPosts returns an empty array when the dataset has no items', async () => {
+  const result = await fetchFounderPosts('https://www.linkedin.com/in/janedoe', {
+    apiToken: 'apify-test-token',
+    fetchImpl: async () => new Response(JSON.stringify([]), { status: 200 })
+  });
+  assert.deepEqual(result, []);
+});
+
+test('fetchFounderPosts throws with no apiToken configured', async () => {
+  await assert.rejects(
+    () => fetchFounderPosts('https://www.linkedin.com/in/janedoe', { fetchImpl: async () => new Response('[]') }),
+    /Apify API token is not configured/
+  );
+});
+
+test('fetchFounderPosts classifies HTTP error statuses for the circuit breaker', async () => {
+  await assert.rejects(
+    () => fetchFounderPosts('https://www.linkedin.com/in/janedoe', {
+      apiToken: 'apify-test-token',
+      fetchImpl: async () => new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 429 })
+    }),
+    (error) => error.errorType === 'rate_limited'
+  );
+});
+
+test('fetchFounderPosts classifies an aborted request as a timeout', async () => {
+  await assert.rejects(
+    () => fetchFounderPosts('https://www.linkedin.com/in/janedoe', {
       apiToken: 'apify-test-token',
       fetchImpl: async () => {
         const error = new Error('aborted');

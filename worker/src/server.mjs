@@ -12,7 +12,7 @@ import { JobPipeline } from './job-pipeline.mjs';
 import { ProviderStateStore } from './provider-state-store.mjs';
 import { loadResumeCatalog } from './resume-catalog.mjs';
 import { lookupCompany } from './company-lookup.mjs';
-import { classifyResumeBucket } from './fit-evaluator.mjs';
+import { classifyResumeBucket, selectVerifiedFacts } from './fit-evaluator.mjs';
 import { discoverJobUrls, verifyDiscoveredUrl, DiscoveryRunner } from './job-discovery.mjs';
 import { getFirecrawlUsage, getApifyUsage } from './usage-tracker.mjs';
 import { startDailyScheduler } from './scheduler.mjs';
@@ -180,6 +180,7 @@ export const startWorker = async ({
   dailyCap = Number(process.env.DAILY_LEAD_CAP || 20),
   apifyActorId = process.env.APIFY_ACTOR_ID || undefined,
   openaiApiKey = process.env.OPENAI_API_KEY || '',
+  candidateName = process.env.CANDIDATE_NAME || undefined,
   firecrawlApiKey = process.env.FIRECRAWL_API_KEY || '',
   apifyApiToken = process.env.APIFY_API_TOKEN || '',
   scheduleEnabled = process.env.DISCOVERY_SCHEDULE_ENABLED === 'true',
@@ -207,6 +208,7 @@ export const startWorker = async ({
   const verifyFallback = (sourceUrl) => verifyDiscoveredUrl(sourceUrl, { firecrawlApiKey, apifyApiToken, apifyActorId, providerState });
   const resumeClassifier = (job, buckets) => classifyResumeBucket(job, buckets, { apiKey: openaiApiKey });
   const companyLookup = (name) => lookupCompany(name, { apiKey: firecrawlApiKey });
+  const factSelector = (job, resumeBucket) => selectVerifiedFacts(job, resumeBucket, { apiKey: openaiApiKey });
 
   const pipeline = new JobPipeline({
     store: pipelineStore,
@@ -216,7 +218,9 @@ export const startWorker = async ({
     resumeClassifier,
     resumeBuckets,
     companyLookup,
-    dailyCap
+    dailyCap,
+    defaultCandidate: { name: candidateName },
+    factSelector
   });
   const discoveryRunner = new DiscoveryRunner({
     pipeline,
@@ -237,6 +241,7 @@ export const startWorker = async ({
     resumeBuckets,
     firecrawlApiKey,
     openaiApiKey,
+    apifyApiToken,
     cap: dailyCap
   });
 

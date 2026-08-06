@@ -1,4 +1,5 @@
 import { firecrawlSearch, firecrawlScrape } from './firecrawl-client.mjs';
+import { fetchFounderPosts } from './apify-client.mjs';
 import { selectProvider } from './provider-selector.mjs';
 
 const API_URL = 'https://api.openai.com/v1/chat/completions';
@@ -75,13 +76,42 @@ const scrapeCompanyContext = async (websiteUrl, { apiKey, fetchImpl } = {}) => {
   }
 };
 
-const buildMessages = ({ founder, companyContext, matchedJob, resumeBucket }) => {
+// The actor returns a founder's full post history regardless of age (verified live: a real
+// profile's maxPosts:0 call returned 22 posts spanning 2015-2021) -- most founders will have
+// nothing within this window, and that's a real signal (they don't post) rather than a fetch
+// failure, so it degrades to null exactly like an empty result.
+const FOUNDER_POST_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1_000;
+const FOUNDER_POST_CONTENT_CHAR_CAP = 400;
+const MAX_FOUNDER_POSTS_IN_PROMPT = 3;
+
+// Same nicety/degrade contract as scrapeCompanyContext -- an Apify error, empty result, or a
+// founder with nothing posted in the last year all collapse to null, never throw.
+const scrapeFounderPosts = async (profileUrl, { apiToken, fetchImpl } = {}) => {
+  if (!profileUrl) return null;
+  try {
+    const posts = await fetchFounderPosts(profileUrl, { apiToken, fetchImpl });
+    const cutoff = Date.now() - FOUNDER_POST_MAX_AGE_MS;
+    const recent = posts.filter((post) => post.postedAt && new Date(post.postedAt).getTime() >= cutoff);
+    if (!recent.length) return null;
+    return recent
+      .slice(0, MAX_FOUNDER_POSTS_IN_PROMPT)
+      .map((post) => post.content.replace(/\s+/g, ' ').trim().slice(0, FOUNDER_POST_CONTENT_CHAR_CAP))
+      .join('\n---\n');
+  } catch {
+    return null;
+  }
+};
+
+const buildMessages = ({ founder, companyContext, matchedJob, resumeBucket, founderPostsContext }) => {
   const roleContext = matchedJob
     ? `They have a real open role, already verified live: "${matchedJob.title || 'Untitled role'}" (${matchedJob.source_url}). Draft the message around this specific role.`
     : 'No specific open role was found at this company. Draft a short, generic value-add "let\'s connect" message -- not a job application.';
   const resumeContext = resumeBucket
     ? `Candidate's relevant background for this role: ${resumeBucket.target_role} -- ${resumeBucket.positioning_angle}.${resumeBucket.reference_text ? ` Reference resume excerpt (structure/tone/experience only): ${resumeBucket.reference_text.slice(0, 1_200)}` : ''}`
     : 'No specific resume bucket matched this opportunity.';
+  const founderPostsPrompt = founderPostsContext
+    ? `The founder's own recent (last 12 months) public LinkedIn posts, given only as a signal of what they're currently thinking about and how they talk -- never assert anything from this as a fact about the company, never quote it directly unless reusing their own words as an explicit callback would genuinely land, and never mention that you "saw their posts" or "have been following" them (that reads as surveillance, not genuine): ${founderPostsContext}`
+    : 'No recent public LinkedIn posts were found for this founder -- most founders don\'t post regularly, so absence of this is normal and not a gap to apologize for.';
   return [
     {
       role: 'system',
@@ -112,7 +142,7 @@ Respond with JSON only: {"message": string, "reason": string}.`
     },
     {
       role: 'user',
-      content: `Founder: ${founder.first_name} ${founder.last_name}, ${founder.position || 'unknown title'} at ${founder.company || 'an unknown company'}.\nCompany website content (may be partial): ${companyContext || 'unavailable'}.\n${roleContext}\n${resumeContext}`
+      content: `Founder: ${founder.first_name} ${founder.last_name}, ${founder.position || 'unknown title'} at ${founder.company || 'an unknown company'}.\nCompany website content (may be partial): ${companyContext || 'unavailable'}.\n${roleContext}\n${resumeContext}\n${founderPostsPrompt}`
     }
   ];
 };
@@ -127,7 +157,7 @@ const truncateToWordBoundary = (text, maxChars) => {
   return (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated).trim();
 };
 
-export const draftOutreachMessage = async ({ founder, companyContext, matchedJob, resumeBucket } = {}, { apiKey, fetchImpl = fetch, model = DEFAULT_MODEL } = {}) => {
+export const draftOutreachMessage = async ({ founder, companyContext, matchedJob, resumeBucket, founderPostsContext } = {}, { apiKey, fetchImpl = fetch, model = DEFAULT_MODEL } = {}) => {
   if (!apiKey) return { message: null, reason: 'OpenAI API key is not configured' };
   if (!founder) return { message: null, reason: 'No founder supplied' };
 
@@ -143,7 +173,7 @@ export const draftOutreachMessage = async ({ founder, companyContext, matchedJob
         // gpt-5.6-terra (the default model) rejects any non-default temperature outright
         // (verified live: "Only the default (1) value is supported") -- omit it rather than
         // pin a value that only worked for the older gpt-4o-mini default.
-        messages: buildMessages({ founder, companyContext, matchedJob, resumeBucket }),
+        messages: buildMessages({ founder, companyContext, matchedJob, resumeBucket, founderPostsContext }),
         response_format: { type: 'json_object' },
         // Verified live against the real API (not assumed from the model family name): gpt-5.6-
         // terra accepts reasoning_effort ('none'/'low'/'medium'/'high'/'xhigh'); 'high' spends
@@ -194,8 +224,8 @@ const isHttpUrl = (value) => {
 };
 
 export class FounderOutreachRunner {
-  constructor({ founderStore, reviewStore, pipeline, lookupCompany, findCareers = findCareersUrl, draftMessage = draftOutreachMessage, resumeClassifier = null, resumeBuckets = [], firecrawlApiKey, openaiApiKey, cap = 20, fetchImpl }) {
-    Object.assign(this, { founderStore, reviewStore, pipeline, lookupCompany, findCareers, draftMessage, resumeClassifier, resumeBuckets, firecrawlApiKey, openaiApiKey, cap, fetchImpl });
+  constructor({ founderStore, reviewStore, pipeline, lookupCompany, findCareers = findCareersUrl, draftMessage = draftOutreachMessage, resumeClassifier = null, resumeBuckets = [], firecrawlApiKey, openaiApiKey, apifyApiToken, cap = 20, fetchImpl }) {
+    Object.assign(this, { founderStore, reviewStore, pipeline, lookupCompany, findCareers, draftMessage, resumeClassifier, resumeBuckets, firecrawlApiKey, openaiApiKey, apifyApiToken, cap, fetchImpl });
   }
 
   // Processes at most `cap` new founders per call (cost control, mirrors JobPipeline's
@@ -280,7 +310,8 @@ export class FounderOutreachRunner {
     const resumeBucket = resumeMatch?.bucket_id ? this.resumeBuckets.find((bucket) => bucket.id === resumeMatch.bucket_id) : null;
 
     const companyContext = await scrapeCompanyContext(companyLinks.website_url, { apiKey: this.firecrawlApiKey, fetchImpl: this.fetchImpl });
-    const drafted = await this.draftMessage({ founder, companyContext, matchedJob, resumeBucket }, { apiKey: this.openaiApiKey, fetchImpl: this.fetchImpl });
+    const founderPostsContext = await scrapeFounderPosts(founder.profile_url, { apiToken: this.apifyApiToken, fetchImpl: this.fetchImpl });
+    const drafted = await this.draftMessage({ founder, companyContext, matchedJob, resumeBucket, founderPostsContext }, { apiKey: this.openaiApiKey, fetchImpl: this.fetchImpl });
 
     const title = `${founder.first_name} ${founder.last_name} — ${founder.company || 'Unknown company'}`.trim();
     const summary = matchedJob
