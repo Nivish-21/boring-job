@@ -88,12 +88,21 @@ test('draftOutreachMessage nulls out a message that uses a banned generic-closer
   assert.match(result.reason, /banned generic-closer phrase/);
 });
 
-test('draftOutreachMessage passes through a message with a genuinely specific closing ask', async () => {
+test('draftOutreachMessage passes through a message with a genuinely specific, reciprocal closing ask', async () => {
   const result = await draftOutreachMessage({ founder }, {
     apiKey: 'sk-test',
-    fetchImpl: chatResponse({ message: 'Hi Jane, saw Nimbus is hiring a Backend Engineer, would love to hear how you\'re thinking about scaling the team past this hire, got 15 minutes this week to swap notes?', reason: 'Role-specific outreach' })
+    fetchImpl: chatResponse({ message: 'Hi Jane, saw Nimbus is hiring a Backend Engineer, I\'ve got a few ideas on where scaling issues usually hide at this stage, happy to walk through what worked for us, got 15 minutes this week?', reason: 'Role-specific outreach' })
   });
-  assert.equal(result.message, 'Hi Jane, saw Nimbus is hiring a Backend Engineer, would love to hear how you\'re thinking about scaling the team past this hire, got 15 minutes this week to swap notes?');
+  assert.equal(result.message, 'Hi Jane, saw Nimbus is hiring a Backend Engineer, I\'ve got a few ideas on where scaling issues usually hide at this stage, happy to walk through what worked for us, got 15 minutes this week?');
+});
+
+test('draftOutreachMessage nulls out a one-way extraction closer with no reciprocity', async () => {
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({ message: 'Hi Jane, saw Nimbus is hiring, would love to hear how you\'re thinking about scaling the team, would be good to swap notes sometime.', reason: 'Generic outreach' })
+  });
+  assert.equal(result.message, null);
+  assert.match(result.reason, /generic-closer/);
 });
 
 test('draftOutreachMessage includes founderPostsContext in the prompt when given', async () => {

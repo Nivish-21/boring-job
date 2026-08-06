@@ -28,7 +28,12 @@ const GENERIC_OPENER_PATTERN = /impressed by|innovative approach|following your 
 // near-identical "jump on a call") because the prompt itself used to hand it out as the
 // illustration of a good ask -- fixed in the prompt below, but caught in code too since a
 // prompt-only fix isn't reliably followed (same lesson as the two guards above).
-const GENERIC_CLOSER_PATTERN = /happy to (hop|jump) on a call|whenever works for you/i;
+// Extended after a live 5-draft/5-critic test: independently of the phrases above, drafts
+// converged on "swap notes"/"compare notes"/"hear how you're thinking about" as a one-way
+// extraction closer with nothing offered back -- same crutch-phrase failure mode as the original
+// two patterns, so it gets the same code-level ban rather than trusting the new reciprocity
+// prompt rule below to be followed on its own.
+const GENERIC_CLOSER_PATTERN = /happy to (hop|jump) on a call|whenever works for you|swap notes|compare notes|hear how you('re| are) thinking about|pick your brain/i;
 // Same principle again: an em dash is one of the clearest AI-writing tells and the user's real
 // voice (see USER_VOICE_SAMPLE) never uses one -- caught in code since a prompt rule alone isn't
 // reliably followed (same lesson as the two guards above).
@@ -123,20 +128,25 @@ Match that voice specifically: a casual opener (not "Hi [Name], I hope..."), run
 
 Write with genuine confidence, not deference -- this is a peer starting a conversation, not someone asking permission to exist. Skip hedges like "I just wanted to", "I hope it's okay to reach out", or "sorry to bother you". State the specific reason for reaching out plainly, like it's obviously worth the founder's time. Confidence must come from the specific, concrete detail already in the message (the role, the metric, the real angle) -- never from generic bravado, hype language, or telling the founder how great/bold/exciting this is, since that reads as gimmicky rather than earned.
 
+The closing ask must be a two-way trade, not a one-way extraction. A live test of this prompt showed drafts converging on "would love to hear how you're thinking about X, let's swap notes" -- that pattern asks the founder to hand over their thinking while offering nothing back, which reads as fishing for insight, not a peer proposing an exchange. Instead, the ask must offer something concrete first (a specific idea, an observation, something the candidate has actually seen or built that's relevant) before or alongside asking for the founder's time -- so the message reads as "here's something real from me, and here's what I'd want from you," not just "tell me about your business."
+
 Hard rules:
 - Never use an em dash anywhere in the message -- it's one of the clearest tells of AI-written text and the candidate never writes that way.
 - Do not open with "I noticed you're building/leading [Company] as [Title] and wanted to introduce myself" or any close variant of it -- vary the opening structure between messages the way a real person naturally would, never a repeated template.
 - There is no fixed length target. Write however long it needs to be to be specific and genuine -- usually a short paragraph or two. Never pad with filler just to fill space, and never cut a real, specific point short just to sound punchy.
-- Never use these banned phrases or close variants of them: "I hope this message finds you well", "I've been following your journey", "impressed by", "innovative approach", "reaching out because", "happy to hop on a call", "happy to jump on a call", "whenever works for you".
-- Never invent a fact not given in the prompt, and never leave a bracketed placeholder like "[your area of expertise]" -- if there is no specific real detail to use, omit that clause instead of guessing.
+- Never use these banned phrases or close variants of them: "I hope this message finds you well", "I've been following your journey", "impressed by", "innovative approach", "reaching out because", "happy to hop on a call", "happy to jump on a call", "whenever works for you", "swap notes", "compare notes", "pick your brain", "hear how you're thinking about".
+- Never invent a fact not given in the prompt, and never leave a bracketed placeholder like "[your area of expertise]" -- if there is no specific real detail to use, omit that clause instead of guessing. The offer in the closing ask must come from the candidate's real background/resume context given below, never a fabricated idea.
 - Lead with one specific, concrete reason for reaching out (the open role if given, or a real detail from the company context) -- not a compliment.
-- End with a single, low-friction, casual ask -- not just "let's connect".
+- End with a single, low-friction, casual ask that includes a real offer, per the reciprocity rule above -- not just "let's connect" or a bare request to learn the founder's thinking.
 
-Good example (matches the voice reference's casual, run-on style, specific, no filler):
-"Hey Raj, saw Nimbus is hiring a Senior Backend Engineer and that's basically what I've been doing for the last 4 years, building production Node/Python APIs at scale and most recently leading a rewrite of a payments service that cut p99 latency by about 40%. Would love to hear how you're thinking about scaling the backend team past this hire, if you've got 15 minutes for that this week I'd love to swap notes."
+Good example (matches the voice reference's casual, run-on style, specific, no filler, and the ask is a two-way trade, not extraction):
+"Hey Raj, saw Nimbus is hiring a Senior Backend Engineer and that's basically what I've been doing for the last 4 years, building production Node/Python APIs at scale and most recently leading a rewrite of a payments service that cut p99 latency by about 40%. I've got a few specific ideas on where that kind of latency usually hides once you scale past this hire, happy to walk through what worked for us, got 15 minutes this week to trade notes?"
 
-Bad example, do NOT write like this -- formulaic template opener, stiff corporate cadence, weak ask:
+Bad example #1, do NOT write like this -- formulaic template opener, stiff corporate cadence, weak ask:
 "Hi Raj, I noticed you're leading Nimbus as CEO and wanted to introduce myself. I'd be interested in hearing how you're thinking about the company's priorities. Would you be open to a 15-minute conversation next week?"
+
+Bad example #2, do NOT write like this either -- specific and confident opener, but the ask is a one-way extraction with nothing offered back:
+"Hey Raj, saw Nimbus is hiring a Senior Backend Engineer and that's really interesting given where you're headed. Would love to hear how you're thinking about scaling the backend team past this hire, would be good to swap notes on it sometime."
 
 Respond with JSON only: {"message": string, "reason": string}.`
     },

@@ -262,10 +262,19 @@ committed, and the codebase's real convention — single quotes, wider lines —
 Prettier's defaults). Left formatting alone rather than reformat the whole file against its own
 established style; flagged adding a matching `.prettierrc` as a separate one-time follow-up.
 
-**Not yet done / next-session pointer:** the LinkedIn-posts feature code is built and tested but
-**not committed or pushed** — awaiting user go-ahead. The reciprocity/ask-quality fix and the two
-newly-reconfirmed bugs are flagged, not fixed — need explicit direction on priority order before
-touching more code.
+**Update, same session:** user approved pushing the LinkedIn-posts feature and fixing the
+reciprocity/ask problem. LinkedIn-posts feature committed and pushed (`6c7d3c2`). Reciprocity fix
+built: root cause was the prompt's own "good example" demonstrating the exact extraction pattern
+the critics flagged (same failure shape as the session-3 closer bug) — rewrote it, added an
+explicit reciprocity rule, and extended `GENERIC_CLOSER_PATTERN` to ban the observed crutch
+phrases ("swap notes", "compare notes", "pick your brain", "hear how you're thinking about").
+153/153 tests passing. Live-verified against 3 real founders — all 3 now lead with a concrete
+offer before the ask. Committed and pushed.
+
+**Still open, next-session pointer:** the `company-lookup.mjs` wrong-company-match bug (confirmed
+recurring, non-deterministic across sessions) has not been investigated — root cause unknown.
+Also still open: no dashboard observability for the LinkedIn-posts fetch outcome. Neither is
+blocking; both need explicit direction before starting.
 
 Built: rewrote both prompt locations that handed the model the exact banned phrase as its own
 "good example," added the phrase variants to the banned-phrase list, added a code-level
