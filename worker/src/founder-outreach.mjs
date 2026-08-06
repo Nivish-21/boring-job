@@ -89,21 +89,37 @@ const FOUNDER_POST_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1_000;
 const FOUNDER_POST_CONTENT_CHAR_CAP = 400;
 const MAX_FOUNDER_POSTS_IN_PROMPT = 3;
 
+// Human-readable note appended to the review item's summary for each outcome -- a QA subagent
+// flagged live that "fetch ran and found nothing" vs. "fetch failed silently" vs. "never
+// configured" were all indistinguishable to a human reviewer since every path just showed up as
+// no context in the draft. Never throws or blocks the pipeline; purely observational.
+const FOUNDER_POSTS_STATUS_NOTES = {
+  used: 'LinkedIn posts: found recent activity, used as context.',
+  not_configured: 'LinkedIn posts: not checked (Apify not configured).',
+  none_found: 'LinkedIn posts: none found for this profile.',
+  all_stale: 'LinkedIn posts: found posts, but none within the last 12 months.',
+  fetch_failed: 'LinkedIn posts: fetch failed, skipped.'
+};
+
 // Same nicety/degrade contract as scrapeCompanyContext -- an Apify error, empty result, or a
-// founder with nothing posted in the last year all collapse to null, never throw.
+// founder with nothing posted in the last year all collapse to a null context, never throw. The
+// `status` alongside it exists purely for the observability note above -- draftMessage only ever
+// sees `context`.
 const scrapeFounderPosts = async (profileUrl, { apiToken, fetchImpl } = {}) => {
-  if (!profileUrl) return null;
+  if (!apiToken) return { context: null, status: 'not_configured' };
   try {
     const posts = await fetchFounderPosts(profileUrl, { apiToken, fetchImpl });
+    if (!posts.length) return { context: null, status: 'none_found' };
     const cutoff = Date.now() - FOUNDER_POST_MAX_AGE_MS;
     const recent = posts.filter((post) => post.postedAt && new Date(post.postedAt).getTime() >= cutoff);
-    if (!recent.length) return null;
-    return recent
+    if (!recent.length) return { context: null, status: 'all_stale' };
+    const context = recent
       .slice(0, MAX_FOUNDER_POSTS_IN_PROMPT)
       .map((post) => post.content.replace(/\s+/g, ' ').trim().slice(0, FOUNDER_POST_CONTENT_CHAR_CAP))
       .join('\n---\n');
+    return { context, status: 'used' };
   } catch {
-    return null;
+    return { context: null, status: 'fetch_failed' };
   }
 };
 
@@ -320,13 +336,14 @@ export class FounderOutreachRunner {
     const resumeBucket = resumeMatch?.bucket_id ? this.resumeBuckets.find((bucket) => bucket.id === resumeMatch.bucket_id) : null;
 
     const companyContext = await scrapeCompanyContext(companyLinks.website_url, { apiKey: this.firecrawlApiKey, fetchImpl: this.fetchImpl });
-    const founderPostsContext = await scrapeFounderPosts(founder.profile_url, { apiToken: this.apifyApiToken, fetchImpl: this.fetchImpl });
-    const drafted = await this.draftMessage({ founder, companyContext, matchedJob, resumeBucket, founderPostsContext }, { apiKey: this.openaiApiKey, fetchImpl: this.fetchImpl });
+    const founderPosts = await scrapeFounderPosts(founder.profile_url, { apiToken: this.apifyApiToken, fetchImpl: this.fetchImpl });
+    const drafted = await this.draftMessage({ founder, companyContext, matchedJob, resumeBucket, founderPostsContext: founderPosts.context }, { apiKey: this.openaiApiKey, fetchImpl: this.fetchImpl });
 
     const title = `${founder.first_name} ${founder.last_name} — ${founder.company || 'Unknown company'}`.trim();
+    const founderPostsNote = FOUNDER_POSTS_STATUS_NOTES[founderPosts.status];
     const summary = matchedJob
-      ? `Open role found: ${matchedJob.title || 'Untitled role'} at ${founder.company}. This draft requires human review before anything is sent.`
-      : `No open role found at ${founder.company || 'this company'}. Generic value-add outreach drafted. This draft requires human review before anything is sent.${drafted.message ? '' : ` (${drafted.reason})`}`;
+      ? `Open role found: ${matchedJob.title || 'Untitled role'} at ${founder.company}. This draft requires human review before anything is sent. ${founderPostsNote}`
+      : `No open role found at ${founder.company || 'this company'}. Generic value-add outreach drafted. This draft requires human review before anything is sent.${drafted.message ? '' : ` (${drafted.reason})`} ${founderPostsNote}`;
     const evidence = [
       companyLinks.website_url ? { label: 'Company website', url: companyLinks.website_url } : null,
       companyLinks.linkedin_url ? { label: 'Company LinkedIn', url: companyLinks.linkedin_url } : null,

@@ -345,6 +345,7 @@ test('run fetches the founder\'s LinkedIn posts and filters out anything older t
   });
   await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
   assert.equal(capturedContext, 'Recent post about hiring');
+  assert.match(reviewStore.created[0].summary, /LinkedIn posts: found recent activity, used as context\./);
 });
 
 test('run passes null founderPostsContext when the founder has no recent posts', async () => {
@@ -363,6 +364,42 @@ test('run passes null founderPostsContext when the founder has no recent posts',
   });
   await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
   assert.equal(capturedContext, null);
+  assert.match(reviewStore.created[0].summary, /LinkedIn posts: none found for this profile\./);
+});
+
+test('run notes all-stale in the summary when posts exist but none are within 12 months', async () => {
+  const founderStore = fakeFounderStore();
+  const reviewStore = fakeReviewStore();
+  const stale = new Date(Date.now() - 400 * 24 * 60 * 60 * 1_000).toISOString();
+  const runner = new FounderOutreachRunner({
+    founderStore,
+    reviewStore,
+    pipeline: { process: async () => ({ stage: 'skipped' }) },
+    lookupCompany: async () => ({ website_url: null, linkedin_url: null }),
+    findCareers: async () => [],
+    apifyApiToken: 'apify-test-token',
+    fetchImpl: async () => new Response(JSON.stringify([{ content: 'Old post', postedAt: { date: stale } }]), { status: 200 }),
+    draftMessage: async () => ({ message: 'hi', reason: '' })
+  });
+  await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
+  assert.match(reviewStore.created[0].summary, /LinkedIn posts: found posts, but none within the last 12 months\./);
+});
+
+test('run notes a failed LinkedIn-posts fetch in the summary without throwing', async () => {
+  const founderStore = fakeFounderStore();
+  const reviewStore = fakeReviewStore();
+  const runner = new FounderOutreachRunner({
+    founderStore,
+    reviewStore,
+    pipeline: { process: async () => ({ stage: 'skipped' }) },
+    lookupCompany: async () => ({ website_url: null, linkedin_url: null }),
+    findCareers: async () => [],
+    apifyApiToken: 'apify-test-token',
+    fetchImpl: async () => new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 500 }),
+    draftMessage: async () => ({ message: 'hi', reason: '' })
+  });
+  await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
+  assert.match(reviewStore.created[0].summary, /LinkedIn posts: fetch failed, skipped\./);
 });
 
 test('run degrades to null founderPostsContext without throwing when no apifyApiToken is configured', async () => {
@@ -379,6 +416,7 @@ test('run degrades to null founderPostsContext without throwing when no apifyApi
   });
   await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
   assert.equal(capturedContext, null);
+  assert.match(reviewStore.created[0].summary, /LinkedIn posts: not checked \(Apify not configured\)\./);
 });
 
 test('run always creates a review item and records the founder, even when drafting fails', async () => {

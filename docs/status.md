@@ -440,3 +440,18 @@ not run — both remain the user's own action per the standing approved scope fr
 deploy this and the earlier fact-selector fix together (neither is live in the running container
 yet), then (2) run the README's reprocess loop themselves against the real 32 packets and
 spot-check output.
+
+## Same day, continued further — Prettier baseline + LinkedIn-posts observability (2026-08-06)
+
+Added `.prettierrc.json` (`singleQuote`, `trailingComma: none`) as a style baseline for new code.
+Investigated whether it could make `prettier --check` pass repo-wide — it structurally cannot: the
+codebase uses hand-formatting (single-line `try/catch`, manual line-wraps) Prettier can't
+reproduce at any width. A `config-protection` hook also blocked a second edit attempt, correctly
+catching a "keep weakening config to silence the checker" pattern. User decided: keep the config
+as a documented baseline, accept `--check` keeps failing on existing files, no `--write` pass, no
+hook bypass. Full reasoning in `docs/decisions.md`.
+
+Fixed the LinkedIn-posts observability gap flagged earlier: `scrapeFounderPosts` now returns
+`{ context, status }`, and a human-readable note per status (used/not-configured/none-found/
+all-stale/fetch-failed) is appended to the review item's summary. 159/159 tests passing,
+live-verified against a real founder. Not yet committed — next action is to commit and push.
