@@ -483,3 +483,32 @@ assuming either.
 
 **If the goal tomorrow is genuinely to close this out:** item 2 (deploy) is the one that actually
 matters — everything else is enhancement on top of code that isn't even running yet.
+
+## 2026-08-07 — Deploy done: item 2 from the standing list is closed
+
+User confirmed deploy as the next issue to fix. Docker Desktop wasn't running; starting it caused
+the first two `docker compose up -d --build` attempts to fail on `context deadline exceeded`
+pulling `node:22-alpine` — root cause turned out to be a hung credential helper (`error getting
+credentials - err: signal: terminated`), not a network problem; a stray macOS Keychain access
+prompt was blocking it non-interactively. User cleared it, retry succeeded immediately.
+
+Ran `docker compose up -d --build`. Container `boring-job-worker-1` rebuilt and is `Up (healthy)`.
+Verified `/health` returns `ok`. Spot-checked the running container's actual file contents (not
+just build success) for three of the outstanding fixes — all confirmed live:
+- `founder-outreach.mjs`: reciprocity ban phrases ("swap notes", "compare notes", "pick your
+  brain") present.
+- `server.mjs`: `POST /api/pipeline/jobs/:stableId/regenerate` route present.
+- `company-lookup.mjs`: `isLinkedInCompanyUrl` uses the `hostname === 'linkedin.com' ||
+  hostname?.endsWith('.linkedin.com')` subdomain-inclusive check.
+
+This makes sessions 4-6's full body of work (fact-selector fix, job-packet regenerate mechanism,
+reciprocity/ask fix, LinkedIn-posts + observability, company-lookup subdomain fix) live for the
+first time.
+
+**Still open, unchanged from before:**
+1. Playroot Golf website-relevance mismatch (`company-lookup.mjs`) — no fix proposed, needs a
+   name-similarity/relevance design decision.
+2. The README's reprocess loop for the 32 existing job packets has not been run — that step
+   remains explicitly the user's own action, not this session's.
+3. The LinkedIn-posts content-injection path (a real founder's posts actually shaping a draft)
+   still only observed in unit tests, never live.
