@@ -8,6 +8,31 @@ const cooldownForError = (errorType) => {
   return null;
 };
 
+// A scraped non-ATS page (company homepage, careers hub) has no guarantee it describes one
+// specific open role -- its <title>/og:title is often just the site/company name. Reject that
+// case rather than let a company homepage get evaluated and drafted as if it were a real posting
+// (confirmed failure: https://latentforce.ai/ scraped title "Latentforce.ai" reached needs_review
+// with a fabricated "Latentforce.ai role" application). Only catches the confirmed pattern --
+// title empty, or title reducing to the bare hostname/company name -- not every possible bad
+// scrape; a generic marketing-phrase title unrelated to the company name would need its own
+// confirmed case before adding a heuristic for it.
+const normalizeForComparison = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const looksLikeJobPosting = (title, sourceUrl) => {
+  const normalizedTitle = normalizeForComparison(title);
+  if (!normalizedTitle) return false;
+  let hostname;
+  try {
+    hostname = new URL(sourceUrl).hostname.replace(/^www\./, '');
+  } catch {
+    return true;
+  }
+  const normalizedHost = normalizeForComparison(hostname);
+  if (normalizedTitle === normalizedHost) return false;
+  if (normalizedHost.startsWith(normalizedTitle)) return false;
+  return true;
+};
+
 const buildJobFromScrape = (selection, scrape) => ({
   ...selection,
   verification_status: 'checked',
@@ -48,7 +73,12 @@ export const verifyDiscoveredUrl = async (sourceUrl, { firecrawlApiKey, apifyApi
     try {
       const scrape = await firecrawlScrape(selection.source_url, { apiKey: firecrawlApiKey, fetchImpl });
       if (providerState) await providerState.recordSuccess('firecrawl');
-      if (scrape.markdown?.trim()) return buildJobFromScrape(selection, scrape);
+      if (scrape.markdown?.trim()) {
+        if (!looksLikeJobPosting(scrape.title, selection.source_url)) {
+          return { ...selection, liveness: 'unverified', verification_status: 'checked', error: 'Scraped page title does not look like a specific job posting (likely a company homepage or careers hub, not a listing).' };
+        }
+        return buildJobFromScrape(selection, scrape);
+      }
     } catch (error) {
       if (providerState) await providerState.recordFailure('firecrawl', { errorType: error.errorType || 'unknown', message: error.message, cooldownMs: cooldownForError(error.errorType) });
     }
@@ -59,7 +89,12 @@ export const verifyDiscoveredUrl = async (sourceUrl, { firecrawlApiKey, apifyApi
     try {
       const scrape = await apifyScrape(selection.source_url, { apiToken: apifyApiToken, actorId: apifyActorId, fetchImpl });
       if (providerState) await providerState.recordSuccess('apify');
-      if (scrape.markdown?.trim()) return buildJobFromScrape(selection, scrape);
+      if (scrape.markdown?.trim()) {
+        if (!looksLikeJobPosting(scrape.title, selection.source_url)) {
+          return { ...selection, liveness: 'unverified', verification_status: 'checked', error: 'Scraped page title does not look like a specific job posting (likely a company homepage or careers hub, not a listing).' };
+        }
+        return buildJobFromScrape(selection, scrape);
+      }
     } catch (error) {
       if (providerState) await providerState.recordFailure('apify', { errorType: error.errorType || 'unknown', message: error.message, cooldownMs: cooldownForError(error.errorType) });
     }

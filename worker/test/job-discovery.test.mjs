@@ -92,11 +92,46 @@ test('verifyDiscoveredUrl skips Firecrawl entirely when the circuit breaker has 
     providerState,
     fetchImpl: async (url) => {
       if (url.toString().includes('firecrawl.dev')) firecrawlCalled = true;
-      return new Response(JSON.stringify([{ markdown: 'Backend role details', metadata: {} }]), { status: 200 });
+      return new Response(JSON.stringify([{ markdown: 'Backend role details', metadata: { title: 'Backend Engineer' } }]), { status: 200 });
     }
   });
   assert.equal(firecrawlCalled, false);
   assert.equal(result.liveness, 'live');
+});
+
+test('verifyDiscoveredUrl rejects a scraped page whose title is just the company homepage/hostname', async () => {
+  const result = await verifyDiscoveredUrl('https://latentforce.ai/', {
+    firecrawlApiKey: 'fc-test',
+    fetchImpl: async () => new Response(JSON.stringify({
+      success: true,
+      data: { markdown: 'Welcome to Latentforce, advanced AI solutions.', metadata: { title: 'Latentforce.ai' } }
+    }), { status: 200 })
+  });
+  assert.equal(result.liveness, 'unverified');
+  assert.match(result.error, /does not look like a specific job posting/);
+});
+
+test('verifyDiscoveredUrl rejects a scraped page whose title is the bare company name without its TLD', async () => {
+  const result = await verifyDiscoveredUrl('https://latentforce.ai/careers', {
+    firecrawlApiKey: 'fc-test',
+    fetchImpl: async () => new Response(JSON.stringify({
+      success: true,
+      data: { markdown: 'Open roles at Latentforce.', metadata: { title: 'Latentforce' } }
+    }), { status: 200 })
+  });
+  assert.equal(result.liveness, 'unverified');
+});
+
+test('verifyDiscoveredUrl accepts a scraped page whose title is a real, specific job title', async () => {
+  const result = await verifyDiscoveredUrl('https://latentforce.ai/careers/backend-engineer', {
+    firecrawlApiKey: 'fc-test',
+    fetchImpl: async () => new Response(JSON.stringify({
+      success: true,
+      data: { markdown: 'We are hiring a backend engineer.', metadata: { title: 'Backend Engineer — Latentforce' } }
+    }), { status: 200 })
+  });
+  assert.equal(result.liveness, 'live');
+  assert.equal(result.job.title, 'Backend Engineer — Latentforce');
 });
 
 test('DiscoveryRunner processes discovered URLs through the pipeline and tallies stage counts', async () => {

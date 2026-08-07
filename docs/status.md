@@ -543,3 +543,29 @@ markdown header in the extracted text, unrelated to this rendering fix.
 **Also answered directly, no code changes:** confirmed the README already documents run + view
 instructions accurately (verified by reading it). No fresh bug audit was run this session — the
 only known open bug remains the Playroot Golf relevance mismatch (item 1 above).
+
+## 2026-08-07 continued — fixed the placeholder-name bug and a fake-job auto-draft bug
+
+User caught a real drafted application reading "I'm Candidate. I'm interested in the Latentforce.ai
+role" and pushed back hard, correctly — this was genuinely broken, not a misreading. Two confirmed,
+separate root causes, both fixed and deployed:
+
+1. **`CANDIDATE_NAME` never reached the container.** Documented in `.env.example`, read by
+   `server.mjs`, but missing from `compose.yml`'s `environment:` passthrough — Compose silently
+   drops any variable not explicitly listed there. Fixed: added it to `compose.yml`.
+2. **The pipeline drafted an application for a page that was never a job posting.** `latentforce.ai`
+   is the company homepage. Any discovered URL outside the supported ATS providers falls back to a
+   raw page scrape that blindly trusted the HTML `<title>` tag as a job title — confirmed live:
+   `title: "Latentforce.ai"` (the site's own page title). `firecrawl-client.mjs` also mislabeled the
+   page's marketing meta-description as `location`. Of 36 discovered jobs, 27 went through this
+   unvalidated path; 26 were caught by the fit evaluator's own scoring, 1 wasn't. Fixed: dropped the
+   location mislabeling; added a specificity gate (`looksLikeJobPosting` in `job-discovery.mjs`)
+   that rejects a scrape as a valid posting when its title is empty or reduces to the bare
+   company/hostname, routing it to `unverified`/human review instead of an autonomous "apply".
+   Deliberately scoped to the confirmed failure pattern, not every hypothetical bad scrape.
+
+168/168 tests passing (3 new for the specificity gate, plus the earlier markdown-rendering tests).
+Rebuilt and redeployed. Confirmed by reading `regenerateOne()` (not by running it) that it now
+correctly throws for the already-committed bad `latentforce.ai` record instead of redrafting it —
+**not actioned against real data**, the user decides whether to reject it in the dashboard or run
+regenerate themselves.

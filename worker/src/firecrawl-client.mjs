@@ -52,7 +52,6 @@ export const firecrawlScrape = async (url, { apiKey, fetchImpl } = {}) => {
   const metadata = data.metadata || {};
   return {
     markdown: data.markdown || '',
-    title: metadata.title || metadata.ogTitle || '',
-    location: metadata['og:description'] || metadata.ogDescription || ''
+    title: metadata.title || metadata.ogTitle || ''
   };
 };

@@ -28,7 +28,7 @@ test('firecrawlSearch defaults to an empty array when no results are returned', 
   assert.deepEqual(results, []);
 });
 
-test('firecrawlScrape posts the url and returns markdown with title/location metadata', async () => {
+test('firecrawlScrape posts the url and returns markdown with title metadata, never the OG description as a location', async () => {
   const result = await firecrawlScrape('https://acme.com/jobs/1', {
     apiKey: 'fc-test',
     fetchImpl: async (url, init) => {
@@ -41,7 +41,7 @@ test('firecrawlScrape posts the url and returns markdown with title/location met
     }
   });
 
-  assert.deepEqual(result, { markdown: '# Backend Engineer', title: 'Backend Engineer', location: 'Remote — India' });
+  assert.deepEqual(result, { markdown: '# Backend Engineer', title: 'Backend Engineer' });
 });
 
 test('throws with no apiKey configured', async () => {
