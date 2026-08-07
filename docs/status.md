@@ -512,3 +512,34 @@ first time.
    remains explicitly the user's own action, not this session's.
 3. The LinkedIn-posts content-injection path (a real founder's posts actually shaping a draft)
    still only observed in unit tests, never live.
+
+## 2026-08-07 continued — fixed job-packet draft readability (raw markdown → rendered HTML)
+
+User reported job-application drafts in the dashboard were "very hard to read" — root cause
+confirmed by reading the code: `packetDraft()` in `job-pipeline.mjs` builds a full markdown
+document (`#`/`##` headers, `- ` bullet lists), and the dashboard dumped that raw string into a
+`<pre>` block as plain text, so literal `#`/`##`/`-` characters rendered unformatted. Founder-
+outreach messages were unaffected (plain prose, no markdown syntax).
+
+Added `worker/public/markdown.js` (`renderDraftMarkdown`, pure function, HTML-escaped, handles
+only the vocabulary `packetDraft()` actually emits — headers, bullet lists, paragraphs). Wired
+into `app.js`'s `renderCard` via `.innerHTML`, applied uniformly to both card kinds (safe no-op
+for founder prose). Swapped the template's `<pre class="draft">` to `<div class="draft">`.
+6 new tests in `worker/test/markdown.test.mjs`. 165/165 passing.
+
+Caught and fixed a second bug during the in-browser verification pass, introduced by this same
+change: the first CSS pass used `font: 700 .95rem/1.4 inherit;`, which is invalid (`inherit`
+can't mix into the `font` shorthand with explicit values) — the whole rule was silently dropped,
+so headers rendered at the browser's huge default `h1` size instead of matching the draft's body
+text. Fixed by splitting into separate `font-family`/`font-size`/`font-weight`/`line-height`
+properties. Rebuilt, redeployed, and visually confirmed in-browser: job-packet headers/lists now
+render at consistent readable size, founder cards are unchanged, no console errors.
+
+**Flagged, not fixed (separate, pre-existing, out of scope):** a resume reference excerpt inside
+one job-packet draft showed a literal `## Professional Summary` mid-paragraph — caused by
+`cleanText()` in `job-pipeline.mjs` collapsing the source resume's original line breaks before a
+markdown header in the extracted text, unrelated to this rendering fix.
+
+**Also answered directly, no code changes:** confirmed the README already documents run + view
+instructions accurately (verified by reading it). No fresh bug audit was run this session — the
+only known open bug remains the Playroot Golf relevance mismatch (item 1 above).

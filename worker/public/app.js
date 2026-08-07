@@ -1,3 +1,5 @@
+import { renderDraftMarkdown } from './markdown.js';
+
 const listings = document.querySelector('#listings');
 const usage = document.querySelector('#usage');
 const template = document.querySelector('#item-template');
@@ -252,7 +254,7 @@ const renderCard = (card) => {
   }
   if (card.draft) {
     fragment.querySelector('.draft-wrap').hidden = false;
-    fragment.querySelector('.draft').textContent = card.draft;
+    fragment.querySelector('.draft').innerHTML = renderDraftMarkdown(card.draft);
   }
   // Copy-to-send is the actual task-completing action for a founder message (it gets pasted into
   // LinkedIn, never sent from here) -- shown whenever a draft exists, independent of status, so
