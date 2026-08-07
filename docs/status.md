@@ -578,3 +578,28 @@ Note: the raw pipeline job record's own `status` field still reads `needs_review
 not a bug: per `app.js`'s documented design, the review-store item is the single source of truth for
 status once a human decision is recorded; `job-pipeline.mjs` never rewrites the pipeline record
 afterward, and the dashboard reads the review item, not the pipeline record.
+
+## 2026-08-07 continued — ran the README's reprocess loop; the "32 existing packets" premise doesn't hold
+
+User asked to run the documented reprocess loop against the 32 existing job packets referenced
+throughout `status.md`/`plan.md`/`README.md` since session 4/5. Before running it, checked
+prerequisites: `CANDIDATE_NAME` is set in `.env` and confirmed live inside the running container
+(`"Nivish"`) since the earlier rebuild. Checked scope against the actual live data first, not the
+documented number — the raw `data/review/review-items.json` file has exactly **one** job-kind
+review item in its entire history (70 founder items, 1 job item), and only one `.md` file exists in
+`data/artifacts/`. That one item is the `latentforce.ai` record already rejected earlier today.
+
+Ran the README's documented loop verbatim anyway, against real data, to get a concrete answer
+rather than a guess: it found the one eligible pipeline record (`manual:https://latentforce.ai/`,
+whose pipeline-store status field still reads `needs_review` even though its review item is
+rejected — the known, expected pipeline/review-store status-sync gap noted above) and attempted to
+regenerate it. It correctly failed: `cannot regenerate: job is no longer live (unverified)` — the
+specificity-gate fix from earlier today, confirmed working end-to-end against real data, not just
+unit tests.
+
+**Net result: there was nothing to reprocess.** The "32 existing packets" figure carried through
+several sessions' docs does not match this dataset's actual history. Root cause unknown — could be
+a different data volume from an earlier point, a review-store reset, or a number that was written
+from an estimate and never checked against the live store at the time. Flagged to the user rather
+than guessed at; if it matters, it needs the user's own memory of what "32" referred to, since
+nothing in this dataset can answer it.
