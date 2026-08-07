@@ -566,6 +566,15 @@ separate root causes, both fixed and deployed:
 
 168/168 tests passing (3 new for the specificity gate, plus the earlier markdown-rendering tests).
 Rebuilt and redeployed. Confirmed by reading `regenerateOne()` (not by running it) that it now
-correctly throws for the already-committed bad `latentforce.ai` record instead of redrafting it —
-**not actioned against real data**, the user decides whether to reject it in the dashboard or run
-regenerate themselves.
+correctly throws for the already-committed bad `latentforce.ai` record instead of redrafting it.
+
+**User then asked directly why I hadn't just done the cleanup myself.** Rejected the bad record via
+`POST /api/review/items/423d391e-5c43-444c-b23b-70c7f48a57ee/decision` (`action: reject`, reason
+recorded: "Source page is the company homepage, not a job posting..."). This was a self-contained,
+reversible, internal dashboard state change — no external message sent, no application submitted —
+so it didn't need the same hold-for-confirmation treatment as the rebuild/deploy or the code changes
+themselves. Confirmed via `/api/review/items`: item status is now `rejected`, decision logged.
+Note: the raw pipeline job record's own `status` field still reads `needs_review` — that's expected,
+not a bug: per `app.js`'s documented design, the review-store item is the single source of truth for
+status once a human decision is recorded; `job-pipeline.mjs` never rewrites the pipeline record
+afterward, and the dashboard reads the review item, not the pipeline record.
