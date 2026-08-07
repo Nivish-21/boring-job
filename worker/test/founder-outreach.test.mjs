@@ -58,7 +58,30 @@ test('draftOutreachMessage returns the drafted message and reason, using the mid
       return chatResponse({ message: 'Hi Jane, ...', reason: 'Generic value-add message' })(url, init);
     }
   });
-  assert.deepEqual(result, { message: 'Hi Jane, ...', reason: 'Generic value-add message' });
+  assert.deepEqual(result, { message: 'Hi Jane, ...', reason: 'Generic value-add message', company_context: null, talking_points: null });
+});
+
+test('draftOutreachMessage returns company_context and talking_points when the model provides them', async () => {
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({
+      message: 'Hi Jane, ...',
+      reason: 'Role-specific outreach',
+      company_context: 'Nimbus Systems builds fleet-management software for last-mile delivery.',
+      talking_points: '- Point one\n- Point two'
+    })
+  });
+  assert.equal(result.company_context, 'Nimbus Systems builds fleet-management software for last-mile delivery.');
+  assert.equal(result.talking_points, '- Point one\n- Point two');
+});
+
+test('draftOutreachMessage nulls out a message that uses a banned abstract-self-description phrase', async () => {
+  const result = await draftOutreachMessage({ founder }, {
+    apiKey: 'sk-test',
+    fetchImpl: chatResponse({ message: "Hi Jane, I'm looking for a team where the work has a real impact, got 15 minutes?", reason: 'Generic outreach' })
+  });
+  assert.equal(result.message, null);
+  assert.match(result.reason, /banned abstract-self-description phrase/);
 });
 
 test('draftOutreachMessage nulls out a message that still contains a bracketed placeholder', async () => {
@@ -321,6 +344,26 @@ test('run stops trying careers URLs at the first needs_review match', async () =
   await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
   assert.deepEqual(processed, ['https://acme.com/careers', 'https://boards.greenhouse.io/acme/jobs/1']);
   assert.equal(reviewStore.created[0].draft, 'role: Backend Engineer');
+});
+
+test('run passes company_context and talking_points from the drafted message through to reviewStore.create', async () => {
+  const founderStore = fakeFounderStore();
+  const reviewStore = fakeReviewStore();
+  const runner = new FounderOutreachRunner({
+    founderStore,
+    reviewStore,
+    lookupCompany: async () => ({ website_url: 'https://acme.com', linkedin_url: null }),
+    findCareers: async () => [],
+    draftMessage: async () => ({
+      message: 'Hi Jane',
+      reason: '',
+      company_context: 'Acme builds warehouse robotics.',
+      talking_points: '- Point one\n- Point two'
+    })
+  });
+  await runner.run([{ profile_url: 'https://www.linkedin.com/in/jane', first_name: 'Jane', last_name: 'Doe', company: 'Acme' }]);
+  assert.equal(reviewStore.created[0].company_context, 'Acme builds warehouse robotics.');
+  assert.equal(reviewStore.created[0].talking_points, '- Point one\n- Point two');
 });
 
 test('run fetches the founder\'s LinkedIn posts and filters out anything older than 12 months', async () => {

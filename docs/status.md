@@ -603,3 +603,62 @@ a different data volume from an earlier point, a review-store reset, or a number
 from an estimate and never checked against the live store at the time. Flagged to the user rather
 than guessed at; if it matters, it needs the user's own memory of what "32" referred to, since
 nothing in this dataset can answer it.
+
+## 2026-08-07 continued — daily 20-founder outreach batch, 20/day cadence going forward
+
+Of 176 founder-titled LinkedIn connections in `Connections.csv`, only 12 had real drafts before
+today (the rest of the founder review-store history was regeneration duplicates from debugging,
+not distinct people). Raised `DAILY_LEAD_CAP` 3 → 20 (`.env`, now the standing daily cap, not a
+one-off), recreated the container, ran one `/api/founders/import` batch: 20 new founders drafted,
+0 errors, 12 skipped as already-done. 25 pending review items now sitting in the dashboard ready
+for manual copy-paste-send. Spot-checked 3 new drafts — on-voice, specific, clean.
+
+144 founders still unprocessed. At 20/day that clears in ~7-8 more days — re-run
+`POST /api/founders/import` with the same CSV each day (dedup handles the rest). No auto-send
+exists or was built; this pipeline only drafts.
+
+## 2026-08-07 continued — draft quality overhaul: company context, reply talking points, natural tone, company-lookup bug fix
+
+Direct user feedback on the first day's drafts: no company context, nothing to fall back on if a
+founder actually replies, and some drafts read as obviously AI-written. All fixed:
+
+- Every founder draft now ships with an "About the company" blurb and 3-4 "If they reply" talking
+  points (real substance behind the draft's hook, not just the opener line) — same OpenAI call,
+  no added cost.
+- Founder-card profile link relabeled "View LinkedIn profile" (was "Open source", same URL).
+- Naturalness: banned abstract self-description filler in the no-matched-role fallback path,
+  validated with an independent blind-critique subagent (confirmed real improvement, not a
+  rubber-stamp).
+- **Found and fixed live**: `lookupCompany()` had no relevance check and could return a completely
+  wrong company's site (confirmed twice — Seacrest Recovery Centers resolved to SAMHSA's helpline,
+  matching the earlier-flagged Playroot Golf mismatch). Now requires the company's own name to
+  appear in a candidate result before accepting it. Re-verified all three known cases now resolve
+  correctly.
+
+All 25 pending founder drafts (the 3 from day one's batch that were still there, plus the fresh
+ones) regenerated with the new fields and fixes — 0 draft errors. 174/174 tests passing, rebuilt
+and redeployed.
+
+Also fixed: a recurring Docker Keychain-credential-helper hang, permanently, by dropping
+`credsStore` from `~/.docker/config.json` (this project never does an authenticated registry
+login, so it was pure overhead). Full detail in `docs/changelog.md` / `docs/lessons.md`.
+
+Known, not investigated: one pre-existing flaky timestamp-ordering test in
+`founder-store.test.mjs`, passed on rerun, unrelated to this session.
+
+## 2026-08-07 continued — session wrap: user starting to send drafts, background tasks cleaned up
+
+User is moving to actually sending the 25 pending founder drafts. Checked for and stopped leftover
+shell state before handing off: the two failed `run_in_background` backfill-loop attempts
+(`bxviqseoi`, `bom1qlr1f`) turned out to still be registered as alive at the task-harness level
+(hung, not exited, despite an empty log and no visible process in `ps aux`) — both stopped via
+`TaskStop`. The Monitor watching the backfill log had already timed out on its own. The worker
+container itself was left running (`docker compose ps` confirms healthy) since the dashboard needs
+it up for the user to actually copy/send drafts.
+
+**Next session should start here:** 144 founders still unprocessed (176 total minus 32 already
+drafted, per `founders.json`'s dedup count — the 25 *pending* count is separate and lower since
+some of the 32 are approved/rejected/expired already); at 20/day, `POST /api/founders/import` with
+the same CSV needs to run daily to clear the backlog. No scheduler exists for founder-outreach
+(only job-discovery has `startDailyScheduler`) — still a manual daily trigger, unchanged from
+today's design decision.

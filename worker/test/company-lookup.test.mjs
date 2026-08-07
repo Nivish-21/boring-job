@@ -63,6 +63,31 @@ test('picks a regional linkedin subdomain (e.g. in.linkedin.com) over a bare-dom
   assert.equal(result.linkedin_url, 'https://in.linkedin.com/company/iedeo');
 });
 
+test('rejects a top result that is unrelated to the company name and falls through to a real match', async () => {
+  const result = await lookupCompany('Seacrest Recovery Centers', {
+    apiKey: 'fc-test',
+    fetchImpl: respondFor(
+      [
+        { url: 'https://www.samhsa.gov/find-help/helplines/national-helpline', title: 'SAMHSA National Helpline' },
+        { url: 'https://seacrestrecoverycenters.com', title: 'Seacrest Recovery Centers — Home' }
+      ],
+      []
+    )
+  });
+  assert.equal(result.website_url, 'https://seacrestrecoverycenters.com');
+});
+
+test('degrades to null when every result is unrelated to the company name (confirmed live: SAMHSA surfaced for "Seacrest Recovery Centers")', async () => {
+  const result = await lookupCompany('Seacrest Recovery Centers', {
+    apiKey: 'fc-test',
+    fetchImpl: respondFor(
+      [{ url: 'https://www.samhsa.gov/find-help/helplines/national-helpline', title: 'SAMHSA National Helpline' }],
+      []
+    )
+  });
+  assert.equal(result.website_url, null);
+});
+
 test('returns nulls when no result passes the filter', async () => {
   const result = await lookupCompany('Acme Robotics', {
     apiKey: 'fc-test',

@@ -68,6 +68,11 @@ h3 { margin: 1.5rem 0 .65rem; font-size: .95rem; }
 .draft p:last-child { margin-bottom: 0; }
 .draft ul { margin: 0 0 .8rem; padding-left: 1.3rem; }
 .draft li { margin-bottom: .3rem; }
+.company-context { max-width: 72ch; margin: 0; padding: .9rem 1rem; background: var(--surface); border-radius: 8px; color: var(--ink); line-height: 1.55; }
+.talking-points { padding: 1rem; background: var(--surface); border-radius: 8px; color: var(--ink); line-height: 1.55; }
+.talking-points ul { margin: 0; padding-left: 1.2rem; }
+.talking-points li { margin-bottom: .4rem; }
+.talking-points li:last-child { margin-bottom: 0; }
 .evidence { margin: 0; padding-left: 1.2rem; color: var(--muted); line-height: 1.55; }
 .evidence a { color: var(--primary); }
 .actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.5rem; }

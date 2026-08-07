@@ -92,6 +92,8 @@ export class ReviewStore {
       source_url: asUrl(input.source_url),
       summary: asText(input.summary, 'summary', { required: true, max: 8_000 }),
       draft: asText(input.draft, 'draft', { max: 16_000 }),
+      company_context: asText(input.company_context, 'company_context', { max: 1_200 }),
+      talking_points: asText(input.talking_points, 'talking_points', { max: 2_000 }),
       artifact_url: input.artifact_url ? asUrl(input.artifact_url) : null,
       fit_score: asNumber(input.fit_score, 'fit_score', { min: 0, max: 10 }),
       evidence: normalizeEvidence(input.evidence),

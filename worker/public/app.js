@@ -85,6 +85,8 @@ const buildCards = (pipelineJobs, reviewItems) => {
         created_at: reviewItem.created_at,
         expires_at: reviewItem.expires_at,
         draft: reviewItem.draft,
+        company_context: reviewItem.company_context,
+        talking_points: reviewItem.talking_points,
         evidence: reviewItem.evidence,
         artifact_url: reviewItem.artifact_url,
         company_links: job.company_links,
@@ -129,6 +131,8 @@ const buildCards = (pipelineJobs, reviewItems) => {
       created_at: item.created_at,
       expires_at: item.expires_at,
       draft: item.draft,
+      company_context: item.company_context,
+      talking_points: item.talking_points,
       evidence: item.evidence,
       artifact_url: item.artifact_url,
       company_links: null,
@@ -217,7 +221,12 @@ const renderCard = (card) => {
   fragment.querySelector('.status').textContent = STATUS_LABELS[card.status] || card.status;
   fragment.querySelector('.status').classList.add(`status-${card.status}`);
   fragment.querySelector('.summary').textContent = card.summary;
-  fragment.querySelector('.source-link').href = card.source_url;
+  const sourceLink = fragment.querySelector('.source-link');
+  sourceLink.href = card.source_url;
+  // Founder cards' source_url is the founder's own LinkedIn profile (see founder-outreach.mjs);
+  // "Open source" reads as an unrelated generic label there since it doesn't say what the link
+  // actually opens -- user feedback flagged missing the button entirely because of this.
+  if (card.kind === 'founder') sourceLink.textContent = 'View LinkedIn profile';
 
   const details = fragment.querySelector('.details');
   const fitClass = typeof card.fit_score === 'number' ? (card.fit_score >= 7 ? 'fit-good' : card.fit_score >= 5 ? 'fit-maybe' : 'fit-poor') : null;
@@ -252,9 +261,17 @@ const renderCard = (card) => {
     link.href = card.company_links.linkedin_url;
     link.hidden = false;
   }
+  if (card.company_context) {
+    fragment.querySelector('.company-context-wrap').hidden = false;
+    fragment.querySelector('.company-context').textContent = card.company_context;
+  }
   if (card.draft) {
     fragment.querySelector('.draft-wrap').hidden = false;
     fragment.querySelector('.draft').innerHTML = renderDraftMarkdown(card.draft);
+  }
+  if (card.talking_points) {
+    fragment.querySelector('.talking-points-wrap').hidden = false;
+    fragment.querySelector('.talking-points').innerHTML = renderDraftMarkdown(card.talking_points);
   }
   // Copy-to-send is the actual task-completing action for a founder message (it gets pasted into
   // LinkedIn, never sent from here) -- shown whenever a draft exists, independent of status, so

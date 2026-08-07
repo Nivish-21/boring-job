@@ -34,6 +34,12 @@ const GENERIC_OPENER_PATTERN = /impressed by|innovative approach|following your 
 // two patterns, so it gets the same code-level ban rather than trusting the new reciprocity
 // prompt rule below to be followed on its own.
 const GENERIC_CLOSER_PATTERN = /happy to (hop|jump) on a call|whenever works for you|swap notes|compare notes|hear how you('re| are) thinking about|pick your brain/i;
+// Same principle, abstract-self-description version: a live 20-draft run showed the no-matched-
+// role fallback path collapsing into vague description of what the candidate abstractly wants
+// ("I'm looking for a team where the work has a real impact") instead of anything specific to the
+// company being messaged -- a prompt rule against it isn't reliably followed alone (same lesson as
+// every guard above), so it's banned in code too.
+const GENERIC_FILLER_PATTERN = /team where the work has a real impact|quick overview of the work I('ve| have) done|where I can be useful/i;
 // Same principle again: an em dash is one of the clearest AI-writing tells and the user's real
 // voice (see USER_VOICE_SAMPLE) never uses one -- caught in code since a prompt rule alone isn't
 // reliably followed (same lesson as the two guards above).
@@ -146,11 +152,13 @@ Write with genuine confidence, not deference -- this is a peer starting a conver
 
 The closing ask must be a two-way trade, not a one-way extraction. A live test of this prompt showed drafts converging on "would love to hear how you're thinking about X, let's swap notes" -- that pattern asks the founder to hand over their thinking while offering nothing back, which reads as fishing for insight, not a peer proposing an exchange. Instead, the ask must offer something concrete first (a specific idea, an observation, something the candidate has actually seen or built that's relevant) before or alongside asking for the founder's time -- so the message reads as "here's something real from me, and here's what I'd want from you," not just "tell me about your business."
 
+Never fall back to describing what the candidate abstractly wants ("I'm looking for a team where the work has a real impact", "I'm looking for something meaningful") or vaguely gesturing at unspecified value ("I can send over a quick overview of the work I've done and where I can be useful") -- this reads as generic AI filler precisely because it has no concrete referent. If there is no matched role and no strong company-context detail to anchor on, find the single most specific real thing available (what the company actually does, a detail from their site, a founder's recent post) and build the message around that instead. A message with less material should be shorter and more specific, never padded out with abstraction to compensate.
+
 Hard rules:
 - Never use an em dash anywhere in the message -- it's one of the clearest tells of AI-written text and the candidate never writes that way.
 - Do not open with "I noticed you're building/leading [Company] as [Title] and wanted to introduce myself" or any close variant of it -- vary the opening structure between messages the way a real person naturally would, never a repeated template.
 - There is no fixed length target. Write however long it needs to be to be specific and genuine -- usually a short paragraph or two. Never pad with filler just to fill space, and never cut a real, specific point short just to sound punchy.
-- Never use these banned phrases or close variants of them: "I hope this message finds you well", "I've been following your journey", "impressed by", "innovative approach", "reaching out because", "happy to hop on a call", "happy to jump on a call", "whenever works for you", "swap notes", "compare notes", "pick your brain", "hear how you're thinking about".
+- Never use these banned phrases or close variants of them: "I hope this message finds you well", "I've been following your journey", "impressed by", "innovative approach", "reaching out because", "happy to hop on a call", "happy to jump on a call", "whenever works for you", "swap notes", "compare notes", "pick your brain", "hear how you're thinking about", "team where the work has a real impact", "quick overview of the work I've done", "where I can be useful".
 - Never invent a fact not given in the prompt, and never leave a bracketed placeholder like "[your area of expertise]" -- if there is no specific real detail to use, omit that clause instead of guessing. The offer in the closing ask must come from the candidate's real background/resume context given below, never a fabricated idea.
 - Lead with one specific, concrete reason for reaching out (the open role if given, or a real detail from the company context) -- not a compliment.
 - End with a single, low-friction, casual ask that includes a real offer, per the reciprocity rule above -- not just "let's connect" or a bare request to learn the founder's thinking.
@@ -164,7 +172,15 @@ Bad example #1, do NOT write like this -- formulaic template opener, stiff corpo
 Bad example #2, do NOT write like this either -- specific and confident opener, but the ask is a one-way extraction with nothing offered back:
 "Hey Raj, saw Nimbus is hiring a Senior Backend Engineer and that's really interesting given where you're headed. Would love to hear how you're thinking about scaling the backend team past this hire, would be good to swap notes on it sometime."
 
-Respond with JSON only: {"message": string, "reason": string}.`
+Bad example #3, do NOT write like this either -- no matched role and no real company detail used, so it collapses into abstract self-description about the candidate instead of anything specific to Nimbus:
+"Hey Raj, I'm looking for a team where the work has a real impact and Nimbus seems like one of those places. I can send over a quick overview of the work I've done and where I can be useful, got 15 minutes to talk it through?"
+
+You also need to give the candidate two other things, since they're a real person who has to actually talk to this founder if they reply, not just send one message and disappear:
+
+1. "company_context": 2-3 plain, factual sentences explaining what this company actually builds or does, written for someone who has never heard of them -- pull this only from the company website content given below, never invent it. Null if no company context was given below.
+2. "talking_points": 3-4 short, concrete points (as a markdown bullet list, each starting with "- ") the candidate can actually use if the founder replies and asks "what did you have in mind?" or similar. This must contain the real substance behind whatever hook/idea/observation the message's opener or closer references -- expanded enough that the candidate could actually explain it out loud, not just repeat the one-liner -- plus a concrete point on how the candidate's real background addresses it, plus (only if a role was matched) one short point on why the candidate fits that specific role. Never invent detail not grounded in the company context, resume context, or matched role given below.
+
+Respond with JSON only: {"message": string, "reason": string, "company_context": string|null, "talking_points": string|null}.`
     },
     {
       role: 'user',
@@ -184,8 +200,8 @@ const truncateToWordBoundary = (text, maxChars) => {
 };
 
 export const draftOutreachMessage = async ({ founder, companyContext, matchedJob, resumeBucket, founderPostsContext } = {}, { apiKey, fetchImpl = fetch, model = DEFAULT_MODEL } = {}) => {
-  if (!apiKey) return { message: null, reason: 'OpenAI API key is not configured' };
-  if (!founder) return { message: null, reason: 'No founder supplied' };
+  if (!apiKey) return { message: null, reason: 'OpenAI API key is not configured', company_context: null, talking_points: null };
+  if (!founder) return { message: null, reason: 'No founder supplied', company_context: null, talking_points: null };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
@@ -212,7 +228,7 @@ export const draftOutreachMessage = async ({ founder, companyContext, matchedJob
 
     if (!response.ok) {
       const errorJson = await response.json().catch(() => null);
-      return { message: null, reason: errorJson?.error?.message || `OpenAI returned HTTP ${response.status}` };
+      return { message: null, reason: errorJson?.error?.message || `OpenAI returned HTTP ${response.status}`, company_context: null, talking_points: null };
     }
 
     const json = await response.json();
@@ -220,26 +236,31 @@ export const draftOutreachMessage = async ({ founder, companyContext, matchedJob
     const parsed = JSON.parse(content);
     let message = typeof parsed.message === 'string' && parsed.message.trim() ? parsed.message.trim() : null;
     let reason = typeof parsed.reason === 'string' ? parsed.reason : '';
+    const companyContextOut = typeof parsed.company_context === 'string' && parsed.company_context.trim() ? parsed.company_context.trim() : null;
+    const talkingPoints = typeof parsed.talking_points === 'string' && parsed.talking_points.trim() ? parsed.talking_points.trim() : null;
     if (message && PLACEHOLDER_PATTERN.test(message)) {
-      return { message: null, reason: 'Model left a bracketed placeholder in the draft -- needs regeneration' };
+      return { message: null, reason: 'Model left a bracketed placeholder in the draft -- needs regeneration', company_context: null, talking_points: null };
     }
     if (message && EM_DASH_PATTERN.test(message)) {
-      return { message: null, reason: 'Model used an em dash -- needs regeneration' };
+      return { message: null, reason: 'Model used an em dash -- needs regeneration', company_context: null, talking_points: null };
     }
     if (message && GENERIC_OPENER_PATTERN.test(message)) {
-      return { message: null, reason: 'Model used a banned generic-opener phrase -- needs regeneration' };
+      return { message: null, reason: 'Model used a banned generic-opener phrase -- needs regeneration', company_context: null, talking_points: null };
     }
     if (message && GENERIC_CLOSER_PATTERN.test(message)) {
-      return { message: null, reason: 'Model used a banned generic-closer phrase -- needs regeneration' };
+      return { message: null, reason: 'Model used a banned generic-closer phrase -- needs regeneration', company_context: null, talking_points: null };
+    }
+    if (message && GENERIC_FILLER_PATTERN.test(message)) {
+      return { message: null, reason: 'Model used a banned abstract-self-description phrase -- needs regeneration', company_context: null, talking_points: null };
     }
     if (message && message.length > MAX_MESSAGE_CHARS) {
       message = truncateToWordBoundary(message, MAX_MESSAGE_CHARS);
       reason = reason ? `${reason} (truncated to fit the ${MAX_MESSAGE_CHARS}-character limit)` : `Truncated to fit the ${MAX_MESSAGE_CHARS}-character limit`;
     }
-    return { message, reason };
+    return { message, reason, company_context: companyContextOut, talking_points: talkingPoints };
   } catch (error) {
     const reason = error?.name === 'AbortError' ? 'OpenAI request timed out' : (error?.message || 'OpenAI request failed');
-    return { message: null, reason };
+    return { message: null, reason, company_context: null, talking_points: null };
   } finally {
     clearTimeout(timeout);
   }
@@ -357,6 +378,8 @@ export class FounderOutreachRunner {
       source_url: founder.profile_url,
       summary,
       draft: drafted.message,
+      company_context: drafted.company_context,
+      talking_points: drafted.talking_points,
       evidence
     });
 

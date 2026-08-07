@@ -30,6 +30,26 @@ const isLinkedInCompanyUrl = (url) => {
   }
 };
 
+const firstSignificantWord = (name) => {
+  const match = String(name || '').toLowerCase().match(/[a-z0-9]{3,}/);
+  return match ? match[0] : null;
+};
+
+// A search result whose title/hostname doesn't even contain the company's own name is very
+// unlikely to actually be that company -- confirmed live: "Seacrest Recovery Centers official
+// website" surfaced SAMHSA's national helpline page (samhsa.gov) as the top non-job-board result,
+// completely unrelated to Seacrest, and it was taken uncritically. Checks only the first
+// significant word (usually the brand name itself, the strongest and most distinctive signal) --
+// never the full name, since secondary words ("Recovery", "Centers", "Technologies") are too
+// generic on their own to be a reliable signal and would false-reject legitimate matches whose
+// title happens to phrase things differently.
+const matchesCompanyName = (result, companyName) => {
+  const word = firstSignificantWord(companyName);
+  if (!word) return true;
+  const haystack = `${result.title || ''} ${hostnameOf(result.url) || ''}`.toLowerCase();
+  return haystack.includes(word);
+};
+
 export const lookupCompany = async (companyName, { apiKey, fetchImpl } = {}) => {
   if (!companyName) return { website_url: null, linkedin_url: null };
 
@@ -38,8 +58,8 @@ export const lookupCompany = async (companyName, { apiKey, fetchImpl } = {}) => 
     firecrawlSearch(`${companyName} LinkedIn company page`, { apiKey, limit: 5, fetchImpl }).catch(() => [])
   ]);
 
-  const website = websiteResults.find((result) => !isJobBoardHost(hostnameOf(result.url)));
-  const linkedin = linkedinResults.find((result) => isLinkedInCompanyUrl(result.url));
+  const website = websiteResults.find((result) => !isJobBoardHost(hostnameOf(result.url)) && matchesCompanyName(result, companyName));
+  const linkedin = linkedinResults.find((result) => isLinkedInCompanyUrl(result.url) && matchesCompanyName(result, companyName));
 
   return {
     website_url: website?.url || null,
