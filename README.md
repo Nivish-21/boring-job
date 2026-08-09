@@ -1,235 +1,369 @@
 # Boring Job
 
-This is a separate Docker scaffold for the Career-Ops automation layer. It does not modify or execute the existing `career-ops-main` project.
+Boring Job is a local-first, human-in-the-loop career-operations assistant. It
+discovers and verifies job postings, evaluates fit, matches a trusted resume,
+prepares review packets, and drafts outreach to founders who are already in the
+user's LinkedIn connections export.
 
-## Current components
+It never submits an application or sends a message. Every external action stays
+manual and supervised.
 
-- `worker` — the whole thing: public-ATS verification, job discovery, fit evaluation,
-  resume matching, review-queue APIs, the review dashboard, and its own daily
-  discovery scheduler (see below). One service, no orchestrator.
-- `data/artifacts` — local output volume for reports and generated documents.
-- `contracts/approval.json` — channel-neutral approval payload shape.
-- `review/` — documentation for the local review dashboard/API served by the worker.
+This repository is independent of `career-ops-main`; running it does not modify
+or execute that project.
 
-## Run locally
+## Project status
 
-On macOS, start Docker Desktop from Applications, or from Terminal:
+The worker, dashboard, job pipeline, founder-outreach pipeline, local scheduler,
+and provider fallbacks are implemented. The automated test suite currently has
+174 passing tests.
+
+The project is designed for one operator on one machine. It stores state in
+local JSON files and Markdown artifacts rather than in a hosted database.
+
+## What is implemented
+
+### Job workflow
+
+- Firecrawl search for individual job URLs, biased towards Greenhouse, Lever,
+  and Ashby postings.
+- Direct verification through the public Greenhouse, Lever, and Ashby job APIs.
+- Firecrawl scrape fallback for unsupported URLs, with Apify as the secondary
+  fallback.
+- Provider circuit breakers that pause a failing fallback instead of repeatedly
+  spending credits.
+- Rejection of known aggregator pages and scraped company homepages that do not
+  look like individual postings.
+- Stable-ID deduplication, a configurable daily review-packet cap, and durable
+  recording of skipped, closed, unverified, and capped jobs.
+- Deterministic location, seniority, and technology-fit gates.
+- OpenAI-assisted resume-bucket matching and extraction of relevant facts from
+  local reference-resume text.
+- Markdown application packets and pending review items for jobs that pass the
+  gates.
+
+### Founder-outreach workflow
+
+- Import of the user's own LinkedIn `Connections.csv` export.
+- Filtering for founder, co-founder, founding, CEO, and chief-executive titles.
+- Company website, LinkedIn, careers-page, and open-role research.
+- Reuse of the verified job pipeline when a matching role is found.
+- Optional recent LinkedIn-post context through Apify.
+- OpenAI-drafted messages with prompts that prohibit unsupported claims and
+  code-level checks for placeholders, generic phrases, and other known failure
+  patterns.
+- Company context and talking points for the human who handles any reply.
+- Per-profile deduplication and targeted regeneration of a draft.
+
+Founder outreach is manually triggered. There is no founder-import scheduler.
+
+### Review dashboard
+
+The worker serves a dashboard at `http://localhost:8080` with separate job and
+founder-outreach views. It includes status, company, and fit filters; source
+evidence; drafts; company context; talking points; regeneration; and
+Firecrawl/Apify usage indicators.
+
+Approving or rejecting an item records a decision only. Copying a founder draft
+copies text to the clipboard only. Neither action sends or submits anything.
+
+## Architecture
+
+Docker Compose runs one Node.js service:
+
+```text
+manual URL / Firecrawl discovery / LinkedIn CSV
+                         |
+                         v
+                 Node.js worker
+       verification -> fit/research -> draft
+                         |
+             local JSON + Markdown artifacts
+                         |
+                         v
+              local review dashboard
+                         |
+                         v
+             supervised external action
+```
+
+The worker contains the HTTP API, static dashboard, pipelines, durable local
+stores, and optional daily job-discovery scheduler. n8n and PostgreSQL are not
+part of the current architecture.
+
+## Requirements
+
+- Docker Desktop with Docker Compose, or Node.js 22 for running the worker
+  directly.
+- A directory containing the resume catalogue expected by
+  `worker/src/resume-catalog.mjs` if resume matching is required.
+- `curl` for the examples below.
+- `jq` only for the optional bulk-regeneration example.
+
+External credentials are feature-specific:
+
+| Variable | Used for | Required? |
+| --- | --- | --- |
+| `FIRECRAWL_API_KEY` | Job discovery, fallback scraping, and company research | Required for discovery and research |
+| `OPENAI_API_KEY` | Resume matching, fact selection, and founder drafts | Required for those AI-assisted steps |
+| `APIFY_API_TOKEN` | Secondary scrape fallback and recent founder-post context | Optional |
+| `APIFY_ACTOR_ID` | Custom fallback scraper actor | Optional |
+| `CANDIDATE_NAME` | Name placed in generated job packets | Recommended |
+| `RESUME_HOST_DIR` | Host directory mounted read-only at `/app/resumes` | Required for resume matching |
+| `REVIEW_AUTH_USER` and `REVIEW_AUTH_PASSWORD` | Basic Auth for the dashboard and APIs | Required together if the service is exposed beyond localhost |
+
+`NOTION_TOKEN` is present in the example environment file for a possible future
+adapter, but the current worker does not use it.
+
+### Resume catalogue contract
+
+`RESUME_HOST_DIR` must contain a `README.md` table and matching files. The
+worker reads five columns in this order: number, file stem, target role, fit
+score, and positioning angle.
+
+```markdown
+| # | File | Target Role | Fit Score | Positioning Angle |
+| --- | --- | --- | --- | --- |
+| 01 | Backend-Engineer | Backend Engineer | 9.0 | Production API experience |
+```
+
+For that row, the catalogue layout is:
+
+```text
+README.md
+01-Backend-Engineer.pdf
+01-Backend-Engineer.docx
+reference/01-Backend-Engineer.txt
+```
+
+The reference text is the source used for AI-assisted fact selection. A missing
+reference file degrades to no extracted facts. The worker does not create or
+edit the PDF and DOCX files.
+
+## Quick start
+
+Start Docker Desktop and confirm that its engine is available:
 
 ```sh
 open -a Docker
-```
-
-Wait until Docker Desktop says its engine is running. Confirm it from this
-repository:
-
-```sh
 docker version
 ```
 
-Create the local configuration file:
+Create local configuration:
 
 ```sh
 cp .env.example .env
-docker compose up -d --build
-docker compose ps
 ```
 
-Open the review dashboard at `http://localhost:8080`. It binds to `localhost`
-only, so it is not reachable from another machine.
+At minimum, set `RESUME_HOST_DIR` to an existing resume-catalogue directory if
+you want resume matching. Add only the provider keys required by the workflows
+you intend to run. Do not commit `.env`, connections exports, resumes, or API
+credentials.
 
-If the service fails to start, inspect it with:
+Build and start the worker:
+
+```sh
+docker compose up -d --build
+docker compose ps
+curl http://localhost:8080/health
+```
+
+Open `http://localhost:8080`. The published port is bound to `127.0.0.1` by
+default.
+
+If startup fails:
 
 ```sh
 docker compose logs --follow worker
 ```
 
-To stop the stack without deleting its data:
+Stop the service without deleting local state:
 
 ```sh
 docker compose down
 ```
 
-To start it again later, use `docker compose up -d`. Do not use `down --volumes`
-unless you intend to erase the local review-queue/pipeline data.
+Do not use `docker compose down --volumes` unless deleting Docker-managed
+volumes is intentional. This project primarily uses bind-mounted local data,
+which should still be backed up separately.
 
-### First smoke test
+## Run the job pipeline
 
-After `docker compose ps` shows `worker` running, verify it:
-
-```sh
-curl http://localhost:8080/health
-```
-
-Then run the pipeline with a real, public job URL from Greenhouse, Lever, or
-Ashby. Replace the URL and candidate facts below; do not use the example URL as
-it is deliberately not a live posting.
+Process one public job posting:
 
 ```sh
 curl -X POST http://localhost:8080/api/pipeline/jobs \
   -H 'content-type: application/json' \
-  -d '{"source_url":"PASTE_A_REAL_PUBLIC_ATS_JOB_URL","candidate":{"name":"Nivish","verified_facts":["Built and operated Node.js production systems.","Works with Docker and PostgreSQL."]}}'
+  -d '{"source_url":"PASTE_A_REAL_PUBLIC_JOB_URL"}'
 ```
 
-For a recommendation of `apply` or `maybe`, open the review dashboard and check
-that one pending item appears. An `approve` decision only records the review; it
-does not submit an application.
+The response reports the stage reached. A job that passes verification and fit
+gates becomes `needs_review`; it is not applied to automatically.
 
-## How Compose fits together
+An API caller may explicitly provide trusted candidate facts. Those facts take
+precedence over automatic extraction:
 
-The `compose.yml` file runs one service: `worker`, which serves the review
-dashboard, the review API, and the job-discovery pipeline. It also mounts
-local folders (`data/artifacts`, `data/review`, your resume folder) so data
-survives restarts.
+```sh
+curl -X POST http://localhost:8080/api/pipeline/jobs \
+  -H 'content-type: application/json' \
+  -d '{"source_url":"PASTE_A_REAL_PUBLIC_JOB_URL","candidate":{"name":"YOUR_NAME","verified_facts":["A fact verified against the candidate resume."]}}'
+```
 
-There used to be an n8n + Postgres pair here whose only job was firing one
-daily HTTP call. n8n added no logic of its own — all discovery, verification,
-fit-scoring, and resume-matching already live in the worker as tested code —
-so it was dropped in favor of a small scheduler built into the worker itself
-(see below). Postgres existed only as n8n's database and went with it.
-
-## Running discovery
-
-Trigger a discovery run manually any time:
+Trigger a discovery run manually:
 
 ```sh
 curl -X POST http://localhost:8080/api/discovery/run
 ```
 
-Results land in the review dashboard at `http://localhost:8080`, same as
-everything else. Nothing auto-applies or auto-sends.
+Discovery and fallbacks can consume paid provider credits. Review the usage
+indicators in the dashboard before enabling unattended runs.
 
-For unattended daily runs, set in `.env`:
+### Optional daily job discovery
 
-```sh
+Set these values in `.env`, then rebuild the worker:
+
+```dotenv
 DISCOVERY_SCHEDULE_ENABLED=true
-DISCOVERY_HOUR_UTC=7   # optional, defaults to 7
+DISCOVERY_HOUR_UTC=7
 ```
-
-then `docker compose up -d --build`. This is off by default — turning it on
-means real Firecrawl (and possibly Apify) credits get spent every day
-unattended, so leave it off until you've reviewed a few manual runs' worth of
-output and cost via the usage strip on the dashboard.
-
-## Intended approval flow
-
-```text
-Discovered/pasted job → worker → application packet
-           → pending approval → local review dashboard
-           → explicit approval → supervised external action → audit record
-```
-
-Telegram, email, or Notion notifications can be added later as separate
-adapters if wanted. They are not required by this scaffold. If any of them
-end up needing genuine scheduling/branching/integration glue rather than
-pipeline logic, that's the point where reaching for something like n8n would
-actually earn its keep — unlike the daily-trigger role it played before.
-
-## Review decisions
-
-The review queue uses three decisions:
-
-- `approve` means the packet is good enough to move to the next supervised step.
-- `reject` means stop using that packet and close the item out.
-- `regenerate` means keep the item pending and ask the orchestrator to produce a new draft or revised evidence.
-
-All three decisions are recorded with the opaque `approval_id` so the queue can audit who decided what and when.
-
-The review dashboard only records decisions. It does not submit applications or send messages.
-
-## Provider selection and verification APIs
-
-The worker can now normalize a public job URL and choose the appropriate adapter
-without fetching the page:
 
 ```sh
-curl -X POST http://localhost:8080/api/providers/resolve \
-  -H 'content-type: application/json' \
-  -d '{"source_url":"https://boards.greenhouse.io/example/jobs/123?utm_source=linkedin"}'
+docker compose up -d --build
 ```
 
-Greenhouse, Lever, and Ashby URL patterns are selected for public API adapters.
-Unknown URLs are deliberately routed to `manual_review`; this endpoint does not
-scrape, log in, or submit anything.
+The scheduler is off by default. It runs job discovery once during the selected
+UTC hour. It does not schedule founder imports.
 
-Verify a direct job URL:
+## Import founder connections
+
+Request a LinkedIn connections export from the account that owns the
+connections, then post its `Connections.csv` file directly to the worker:
 
 ```sh
-curl -X POST http://localhost:8080/api/jobs/verify \
-  -H 'content-type: application/json' \
-  -d '{"source_url":"https://boards.greenhouse.io/example/jobs/123"}'
+curl -X POST http://localhost:8080/api/founders/import \
+  -H 'content-type: text/csv' \
+  --data-binary @/path/to/Connections.csv
 ```
 
-It calls the matching Greenhouse, Lever, or Ashby public job endpoint, returns a
-normalized job record with retrieval time and source URL, and marks a missing
-posting as `closed`. It does not make applications or use a browser.
+Each call processes at most `DAILY_LEAD_CAP` new founder profiles, defaulting to
+20. Previously recorded profile URLs are skipped. Re-run the import manually on
+later days to process a larger file.
 
-## End-to-end local job pipeline
+The workflow may spend Firecrawl, OpenAI, and Apify credits. It creates review
+items even when drafting fails, so failures remain visible instead of being
+silently discarded. The dashboard's regenerate action retries one stored
+profile without re-importing the CSV.
 
-`POST /api/pipeline/jobs` runs the safe local workflow in one request: public
-verification, stable-ID deduplication, hard location/seniority/stack gates,
-evidence-backed fit evaluation, a review packet, and a pending review-queue
-item. It never submits an application.
+Never commit the LinkedIn export. It contains personal data.
+
+## Review and regeneration
+
+Pending review tokens expire after 48 hours. The dashboard supports:
+
+- **Approve** — record that the current packet or message passed review.
+- **Reject** — close the current review item.
+- **Regenerate** — reject the stale pending item, re-run the relevant workflow,
+  and create a fresh review item.
+
+Job regeneration re-verifies the original posting. It fails deliberately if the
+job is no longer live.
+
+To regenerate one job by API:
 
 ```sh
-curl -X POST http://localhost:8080/api/pipeline/jobs \
-  -H 'content-type: application/json' \
-  -d '{"source_url":"https://boards.greenhouse.io/example/jobs/123","candidate":{"name":"Nivish","verified_facts":["Built and operated Node.js production systems.","Works with Docker and PostgreSQL."]}}'
+curl -X POST "http://localhost:8080/api/pipeline/jobs/URL_ENCODED_STABLE_ID/regenerate"
 ```
 
-Generated review packets are written to the worker artifact volume. The caller
-must still use the review dashboard to record an explicit decision; approval is
-not a submit action.
-
-## Regenerating a job packet
-
-`POST /api/pipeline/jobs/:stableId/regenerate` redrafts a single already-processed job packet
-from scratch: it rejects the old pending review item (if any), re-verifies the posting is still
-live, re-runs fit evaluation/company lookup/resume matching, and creates a fresh review item. Use
-it when a packet is stuck with a placeholder name, stale facts, or any other reason you want a new
-draft without re-running the whole daily pipeline.
+To regenerate every job currently waiting for review:
 
 ```sh
-curl -X POST http://localhost:8080/api/pipeline/jobs/STABLE_ID/regenerate
-```
-
-`STABLE_ID` is the `stable_id` field on the job record (visible via `GET /api/pipeline/jobs` or in
-the dashboard). If the posting is no longer live, this returns an error instead of drafting an
-application for a dead job — that's by design, not a bug.
-
-### Reprocessing all existing packets after the fact-selector fix
-
-Packets generated before the candidate-fact-selector fix landed carry the placeholder name
-`"Candidate"` and no real facts, because nothing populated the candidate object before that fix.
-Set `CANDIDATE_NAME` in `.env` and confirm `OPENAI_API_KEY` is set, then rebuild
-(`docker compose up -d --build`) so both fixes are live. To reprocess every packet stuck in
-`needs_review`, list them and call the regenerate endpoint for each:
-
-```sh
-curl -s http://localhost:8080/api/pipeline/jobs?status=needs_review \
+curl -s 'http://localhost:8080/api/pipeline/jobs?status=needs_review' \
   | jq -r '.jobs[].stable_id' \
   | while read -r stable_id; do
-      echo "Regenerating $stable_id..."
-      curl -s -X POST "http://localhost:8080/api/pipeline/jobs/$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$stable_id")/regenerate" \
-        | jq '{stable_id: $stable_id, ok, error}' --arg stable_id "$stable_id"
-      sleep 1
+      encoded_id="$(jq -rn --arg value "$stable_id" '$value | @uri')"
+      curl -s -X POST "http://localhost:8080/api/pipeline/jobs/$encoded_id/regenerate" \
+        | jq --arg stable_id "$stable_id" '{stable_id: $stable_id, ok, error}'
     done
 ```
 
-A posting that's gone dead since it was first discovered will fail to regenerate (expected — you
-can't draft an application for a job that no longer exists); skip it and move on rather than
-treating it as a script failure. After running this, spot-check a sample of the regenerated
-packets in the review dashboard for a real name and real, grounded facts.
+Bulk regeneration can consume the same paid provider credits as normal
+processing. Run it deliberately and inspect the resulting packets.
 
-This step spends real OpenAI/Firecrawl/Apify credits per packet (the same cost as a normal
-pipeline run) — run it deliberately, not as part of every deploy.
+## API reference
 
-## Not implemented yet
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Public worker health check |
+| `GET` | `/api/review/items` | List review items; optional `status` query |
+| `POST` | `/api/review/items` | Create a validated review item |
+| `POST` | `/api/review/items/:id/decision` | Record an approval, rejection, regeneration marker, or skip |
+| `POST` | `/api/providers/resolve` | Normalise a URL and select its provider adapter |
+| `POST` | `/api/jobs/verify` | Verify a supported ATS URL through its public API |
+| `POST` | `/api/pipeline/jobs` | Process one job through the safe pipeline |
+| `GET` | `/api/pipeline/jobs` | List pipeline records; optional `status` query |
+| `POST` | `/api/pipeline/jobs/:stableId/regenerate` | Rebuild one stored job packet |
+| `POST` | `/api/discovery/run` | Run job discovery now |
+| `POST` | `/api/founders/import` | Import a LinkedIn connections CSV |
+| `POST` | `/api/founders/:profile/regenerate` | Rebuild one stored founder draft |
+| `GET` | `/api/usage` | Read Firecrawl and Apify usage summaries |
 
-- Notion credentials/property mapping and production workflow
-- LLM prompts and model calls
-- Apify fallback
-- browser login or submission
-- Canonical CV/PDF generation
-- Telegram/email integrations
+When Basic Auth is configured, every route except `/health` requires it.
 
-Never put browser cookies, API keys, or candidate identity documents in workflow JSON or source control.
+The legacy `/scan`, `/verify`, `/evaluate`, and `/generate` routes intentionally
+return HTTP 501 and must not be treated as working endpoints.
+
+## Local data
+
+Compose bind-mounts these directories:
+
+- `data/review/` — review items, pipeline jobs, founder records, and provider
+  circuit-breaker state.
+- `data/artifacts/` — generated Markdown job packets.
+- `RESUME_HOST_DIR` — the external resume catalogue, mounted read-only.
+
+The JSON stores use atomic replacement for writes but are not a multi-user
+database. Back up `data/review/` before moving machines or making manual edits.
+
+## Verification
+
+Run the worker tests with Node.js 22:
+
+```sh
+cd worker
+npm test
+```
+
+Validate the Compose configuration from the repository root:
+
+```sh
+docker compose config --quiet
+```
+
+## Deliberate limitations
+
+- No automatic application submission, browser login, or form filling.
+- No automatic LinkedIn, email, Telegram, or other message sending.
+- No Notion integration.
+- No generation of a new tailored PDF or DOCX resume. The worker selects from an
+  existing, externally managed resume catalogue and generates Markdown packets.
+- No hosted database, multi-user locking, or remote deployment configuration.
+- Generic non-ATS pages use heuristic scrape validation and may remain
+  `unverified` for manual review.
+- The job fit evaluator contains project-specific rules, including an India/
+  remote eligibility bias and a seniority gate. Review them before adapting the
+  project for another candidate.
+
+## Repository map
+
+```text
+compose.yml             One-service local deployment
+worker/src/             API, pipelines, providers, stores, and scheduler
+worker/public/          Review dashboard
+contracts/              Approval payload contract
+review/README.md        Review-surface behaviour and integration notes
+data/artifacts/         Generated Markdown packets
+data/review/            Durable local state
+PLAN.md                 Historical design record; not the current architecture
+```
+
+Never place browser cookies, API keys, connections exports, resumes, or other
+candidate identity documents in source control.

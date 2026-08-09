@@ -1,60 +1,112 @@
 # Review surface
 
-The first review surface is now served by the worker at `http://localhost:8080`.
-It is intentionally a local queue: it records review decisions but cannot submit
-an application or send a message.
+The review dashboard is served by the worker at `http://localhost:8080`. It
+combines durable pipeline records with pending and completed review items so the
+operator can inspect both successful drafts and jobs that were skipped, closed,
+unverified, rejected as bad sources, or deferred by the daily cap.
 
-Set `REVIEW_AUTH_USER` and `REVIEW_AUTH_PASSWORD` in `.env` before exposing the
-dashboard anywhere beyond localhost. For a local n8n workflow, use the worker
-hostname (`http://worker:8080`) rather than `localhost`, because n8n runs in its
-own container. Configure the same Basic Auth values in n8n's HTTP Request
-credential when they are enabled. n8n can create a review item with:
+It is a decision and copy surface only. It cannot submit an application or send
+a founder message.
+
+## Security boundary
+
+Docker Compose binds the worker to `127.0.0.1` by default. Set both
+`REVIEW_AUTH_USER` and `REVIEW_AUTH_PASSWORD` before exposing it beyond the
+local machine. The worker refuses to start if only one value is set.
+
+When Basic Auth is enabled, `/health` remains public and all dashboard assets
+and `/api/*` routes require authentication.
+
+## What the dashboard shows
+
+- Separate founder-outreach and job views.
+- Pending, approved, rejected, skipped, capped, unverified, expired, and bad-
+  source statuses.
+- Company search and minimum-fit filters.
+- Original source links and supporting evidence.
+- Job packets, founder messages, company context, and talking points.
+- Firecrawl and Apify usage summaries when those providers are configured.
+- Copy, approve, reject, and kind-specific regenerate actions.
+
+Founder messages are copied to the clipboard for manual pasting. External
+submission or sending always requires a separate action outside this project.
+
+## Review lifecycle
+
+A new review item receives an opaque `approval_id` and expires after 48 hours.
+Every decision request must present the matching token. Final approve, reject,
+and skip decisions consume it and are appended to the item's decision history.
+
+The dashboard's regenerate button does more than record a generic review
+decision:
+
+- For a job, it calls `/api/pipeline/jobs/:stableId/regenerate`, re-verifies the
+  posting, and produces a fresh packet.
+- For a founder, it calls `/api/founders/:profile/regenerate` and re-runs the
+  stored profile's research and drafting workflow.
+
+In both cases, the old pending item is rejected as superseded and a new review
+item is created. A dead job fails regeneration rather than producing a packet
+from stale evidence.
+
+## Creating a review item directly
+
+The normal pipelines create their own review items. A separate trusted local
+tool can also use the validated API directly:
 
 ```http
-POST http://worker:8080/api/review/items
+POST http://localhost:8080/api/review/items
 Content-Type: application/json
 
 {
-  "item_id": "notion-page-id",
+  "item_id": "source-system-id",
   "kind": "job",
   "title": "Backend Engineer — Example Co",
   "source_url": "https://jobs.example.com/backend-engineer",
   "summary": "Evidence-backed fit summary for human review.",
   "fit_score": 8,
-  "draft": "Tailored cover-letter or application-answer draft.",
-  "evidence": [{ "label": "Job posting", "url": "https://jobs.example.com/backend-engineer" }]
+  "draft": "Draft content that still requires human review.",
+  "evidence": [
+    {
+      "label": "Job posting",
+      "url": "https://jobs.example.com/backend-engineer"
+    }
+  ]
 }
 ```
 
-The dashboard includes the opaque `approval_id` in every decision request. That
-ID expires after 48 hours and is consumed after approval or rejection. A
-regenerate request keeps the item in the queue with the same approval token.
-An orchestrator must still perform a separate, supervised next step.
+`kind` must be `job` or `founder`. URLs must use HTTP or HTTPS. Field lengths,
+fit-score bounds, and evidence counts are validated before the item is stored.
 
-Decision meanings:
+## Decision API
 
-- `approve` records that the current packet can move to the next supervised step.
-- `reject` records that this packet should not be used as-is and closes the item.
-- `regenerate` records that the item should stay pending while the orchestrator builds a revised draft.
+Record a decision against a pending item:
 
-This surface records decisions only. It does not submit an application or send a message.
+```http
+POST http://localhost:8080/api/review/items/REVIEW_ITEM_ID/decision
+Content-Type: application/json
 
-Each item shows:
+{
+  "action": "approve",
+  "approval_id": "OPAQUE_APPROVAL_ID",
+  "actor": "local-reviewer",
+  "reason": "Evidence and draft checked."
+}
+```
 
-- source job/founder evidence;
-- fit score and uncertainty;
-- generated resume/message;
-- direct source/application link;
-- approve, reject, and regenerate actions.
+The low-level decision endpoint accepts `approve`, `reject`, `regenerate`, and
+`skip`. A low-level `regenerate` decision only leaves the item pending; it does
+not rebuild content. Use the dashboard or the kind-specific regeneration routes
+when a new draft is required.
 
-External submission must require a second confirmation after the artifact is opened.
+## Local verification
 
-## Local checklist
-
-1. Start Docker Desktop, then run `docker compose up -d --build` in the project
-   root.
+1. Run `docker compose up -d --build` from the repository root.
 2. Check `curl http://localhost:8080/health`.
-3. Open the dashboard at `http://localhost:8080`.
-4. Run the documented pipeline endpoint or the n8n Manual Trigger workflow.
-5. Review the source and draft; record a decision. No decision sends or submits
-   anything externally.
+3. Open `http://localhost:8080`.
+4. Run a documented job or founder workflow from the root README.
+5. Inspect the evidence and draft, then record a decision.
+6. Confirm that no decision has sent a message or submitted an application.
+
+n8n and PostgreSQL are not part of the current deployment. The worker owns the
+API, dashboard, scheduler, pipelines, and local state.
