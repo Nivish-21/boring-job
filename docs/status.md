@@ -661,4 +661,40 @@ drafted, per `founders.json`'s dedup count — the 25 *pending* count is separat
 some of the 32 are approved/rejected/expired already); at 20/day, `POST /api/founders/import` with
 the same CSV needs to run daily to clear the backlog. No scheduler exists for founder-outreach
 (only job-discovery has `startDailyScheduler`) — still a manual daily trigger, unchanged from
-today's design decision.
+today’s design decision.
+
+## 2026-08-23 — Founder-outreach message-strategy pivot: planned, not built
+
+User raised a strategy realization (prompted by outreach-strategy commentary seen elsewhere):
+researched/personalized cold outreach — the exact approach `founder-outreach.mjs` currently uses
+(scraped company context, a founder's LinkedIn posts, a manufactured two-way-trade ask) — now
+reads as a recognizable formula to recipients and kills response rate regardless of craft quality.
+Worked through via `superpowers:brainstorming` (classified bounded) then `superpowers:writing-plans`.
+
+**Direction approved:** drop the researched-hook framing entirely. Keep only the existing cheap
+role-match check (`findCareersUrl`/`pipeline.process()`) as "light" research. Two message types:
+role found → direct ask tied to the role + real background; no role found → plainly state
+currently job hunting, real background, ask if the founder knows of anything/could help/has
+anything opening soon. All five existing code-level guards (placeholder, em dash, generic-opener,
+generic-closer, generic-filler) and the voice sample stay untouched — confirmed with the user they
+aren't part of the pivot.
+
+**Full plan written:** `docs/plan.md`, new block "founder-outreach message-strategy pivot — direct,
+not researched." Decision logged in `docs/decisions.md` (2026-08-23 entry), including why the
+scraping infra (`scrapeCompanyContext`, `scrapeFounderPosts`/`fetchFounderPosts` in
+`apify-client.mjs`) gets removed rather than just unused-in-prompt, and why
+`company_context`/`talking_points` are dropped from new drafts but left rendering in the dashboard
+for the 25 already-pending founder drafts built under the old strategy.
+
+**Explicit user instruction: docs only this session, build deferred to later.** No code touched.
+Next session should open by confirming the user still wants to proceed with the plan as written,
+then execute via the plan block in `docs/plan.md` (test-first per file, then rebuild/redeploy,
+then a small spot-check regenerate — not the full 25, that stays the user's own call).
+
+## 2026-08-08 — MCP connection setup complete
+
+Vercel MCP is enabled and authorised with OAuth (`https://mcp.vercel.com`). GitHub and Miro were
+already connected and passed read-only identity checks. The remaining configured MCP servers are
+local utilities with unsupported account authentication (`node_repl`, Playwright, and disabled
+`computer-use`). No project source or configuration files changed. Vercel MCP tools require a
+fresh Codex session before use because the current session's tool registry predates the OAuth flow.
